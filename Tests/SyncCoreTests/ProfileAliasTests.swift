@@ -51,16 +51,19 @@ extension CoreTests {
         _ = try await engine.refreshUsage(credential: { _ in UsageCredential(token: "fixture", plan: "pro") }, fetch: { _ in try self.usageData(7) })
         let usageBefore = try Data(contentsOf: engine.usageCache)
         _ = try engine.setProfileAlias(id: id, kind: "account", alias: "My account")
-        _ = try engine.saveAccount(name: "Updated source name")
+        let snapshot = try engine.accounts().first?["snapshot"] as? String
+        try login(a, token: "refreshed-login")
+        _ = try engine.switchProfile(id: gateway)
+        XCTAssertNotEqual(try engine.accounts().first?["snapshot"] as? String, snapshot)
         let status = try engine.status()
         let profile = try XCTUnwrap(status.profiles.first { $0.kind == "account" })
         XCTAssertEqual(profile.name, "My account")
-        XCTAssertEqual(profile.originalName, "Updated source name")
+        XCTAssertEqual(profile.originalName, "Initial name")
         XCTAssertEqual(status.officialUsage.first?.name, "My account")
         XCTAssertEqual(status.officialUsage.first?.windows.first?.utilization, 7)
         XCTAssertEqual(try Data(contentsOf: engine.usageCache), usageBefore)
         _ = try engine.setProfileAlias(id: id, kind: "account", alias: nil)
-        XCTAssertEqual(try engine.officialUsage().first?.name, "Updated source name")
+        XCTAssertEqual(try engine.officialUsage().first?.name, "Initial name")
     }
 
     func testInvalidAndStaleAliasEditsPreserveSavedAliases() throws {

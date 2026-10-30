@@ -7,6 +7,7 @@ public struct SessionInfo: Codable, Identifiable {
     public let lastActivity: Double
     public let transcriptAvailable: Bool
     public let archived: Bool
+    public let initializing: Bool
 }
 struct Owner: Hashable {
     let profile: String
@@ -21,6 +22,47 @@ struct Record {
     let value: [String: Any]
     var id: String { value["sessionId"] as! String }
     var activity: Double { (value["lastActivityAt"] as? NSNumber)?.doubleValue ?? 0 }
+    var initializing: Bool { isInitializingCodeRecord(value) }
+}
+
+// Desktop persists a placeholder before starting the CLI. It is not a broken record.
+func isInitializingCodeRecord(_ value: [String: Any]) -> Bool {
+    guard value["cliSessionId"] == nil || value["cliSessionId"] is NSNull,
+          let pending = value["pendingFirstStart"] as? [String: Any],
+          let since = pending["since"] as? Double, since.isFinite, since > 0,
+          pending["options"] is [String: Any] else { return false }
+    return true
+}
+
+public struct LiveRecordReadPending: LocalizedError {
+    public let fileName: String
+    public var errorDescription: String? { "Claude 正在写入会话记录，请稍后重试：\(fileName)" }
+}
+
+func readNativeRecordJSON(_ file: URL, running: Bool,
+                          read: (URL) throws -> Data = { try Data(contentsOf: $0) },
+                          pause: (Double) -> Void = { Thread.sleep(forTimeInterval: $0) }) throws -> [String: Any] {
+    try safePath(file)
+    for attempt in 0..<3 {
+        do {
+            let data = try read(file)
+            guard let value = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                throw SyncError("Code 记录必须是 JSON 对象：\(file.lastPathComponent)")
+            }
+            return value
+        } catch {
+            let ns = error as NSError
+            let retryable = ns.domain == NSCocoaErrorDomain && [NSFileReadNoSuchFileError, 3840].contains(ns.code)
+            guard running && retryable else { throw error }
+            if attempt < 2 { pause(attempt == 0 ? 0.025 : 0.075); continue }
+            let modified = (try? fm.attributesOfItem(atPath: file.path)[.modificationDate]) as? Date
+            if modified == nil || abs(modified!.timeIntervalSinceNow) < 2 {
+                throw LiveRecordReadPending(fileName: file.lastPathComponent)
+            }
+            throw SyncError("Code 记录无法读取：\(file.lastPathComponent)。请检查该记录；其他归档仍保留。")
+        }
+    }
+    preconditionFailure("unreachable")
 }
 
 func uuid(_ value: String) -> Bool { UUID(uuidString: value) != nil && !value.contains("/") }
@@ -30,8 +72,10 @@ final class History {
     let support: URL
     let home: URL
     let vault: URL
-    init(support: URL, home: URL, state: URL) {
+    let isRunning: () -> Bool
+    init(support: URL, home: URL, state: URL, isRunning: @escaping () -> Bool = { false }) {
         self.support = support; self.home = home; self.vault = state.appendingPathComponent("history")
+        self.isRunning = isRunning
     }
     func owners() throws -> [Owner] {
         var owners: [Owner] = []
@@ -54,9 +98,10 @@ final class History {
         var records: [Record] = []
         for owner in try owners() {
             for file in try fm.contentsOfDirectory(at: owner.directory, includingPropertiesForKeys: nil) where file.pathExtension == "json" && file.lastPathComponent.hasPrefix("local_") {
-                let value = try readJSON(file)
+                let value = try readNativeRecordJSON(file, running: isRunning())
                 guard let id = value["sessionId"] as? String, validSession(id), file.lastPathComponent == id + ".json",
-                      let cli = value["cliSessionId"] as? String, uuid(cli), let cwd = value["cwd"] as? String, cwd.hasPrefix("/") else {
+                      let cwd = value["cwd"] as? String, cwd.hasPrefix("/"),
+                      isInitializingCodeRecord(value) || (value["cliSessionId"] as? String).map(uuid) == true else {
                     throw SyncError("发现不支持的 Code 记录格式，未修改原记录：\(file.lastPathComponent)")
                 }
                 // SSH/cloud records require their original remote context. Never relabel them as local.
@@ -90,7 +135,7 @@ final class History {
         let records = try records(), transcripts = try transcripts()
         try privateDir(vault)
         var index = try readJSON(vault.appendingPathComponent("index.json"), optional: true)
-        for record in records {
+        for record in records where !record.initializing {
             let bytes = try jsonData(record.value), hash = sha(bytes)
             let version = vault.appendingPathComponent("records/\(record.id)/\(hash).json")
             if !exists(version) { try atomicData(bytes, version) }
@@ -131,7 +176,7 @@ final class History {
         return infos.values.sorted { $0.lastActivity > $1.lastActivity }
     }
     func info(_ d: [String: Any], _ ts: [String: URL]) -> SessionInfo {
-        SessionInfo(id: d["sessionId"] as? String ?? "", title: d["title"] as? String ?? "未命名会话", project: d["originCwd"] as? String ?? d["cwd"] as? String ?? "", lastActivity: (d["lastActivityAt"] as? NSNumber)?.doubleValue ?? 0, transcriptAvailable: ts[d["cliSessionId"] as? String ?? ""] != nil, archived: d["isArchived"] as? Bool ?? false)
+        SessionInfo(id: d["sessionId"] as? String ?? "", title: d["title"] as? String ?? "未命名会话", project: d["originCwd"] as? String ?? d["cwd"] as? String ?? "", lastActivity: (d["lastActivityAt"] as? NSNumber)?.doubleValue ?? 0, transcriptAvailable: ts[d["cliSessionId"] as? String ?? ""] != nil, archived: d["isArchived"] as? Bool ?? false, initializing: isInitializingCodeRecord(d))
     }
     // Existing records are never overwritten. Cross-account copies reset permissions and connector state.
     func merge(into targets: [Owner], transaction: Transaction) throws -> Int {

@@ -5,6 +5,7 @@ import SyncCore
 @main
 struct SyncClaudeApp: App {
     @StateObject private var model = AppModel()
+    @StateObject private var updates = UpdateModel()
     init() {
         let args = CommandLine.arguments
         if args.count == 3 && args[1] == "--credential" {
@@ -57,10 +58,13 @@ struct SyncClaudeApp: App {
         }
     }
     var body: some Scene {
-        WindowGroup("Sync Claude") { MainView(model: model).frame(minWidth: 960, minHeight: 640) }
+        WindowGroup("Sync Claude") { MainView(model: model).environmentObject(updates).frame(minWidth: 960, minHeight: 640) }
             .defaultSize(width: 1100, height: 740)
             .windowStyle(.titleBar)
             .commands {
+                CommandGroup(after: .appInfo) {
+                    Button("检查更新…") { updates.check(manual: true) }.disabled(updates.checking)
+                }
                 CommandGroup(replacing: .newItem) {}
                 CommandMenu("同步") {
                     Button("刷新状态") { model.refresh() }.keyboardShortcut("r")
@@ -86,6 +90,8 @@ struct SyncClaudeApp: App {
     @Published var busy = false
     @Published var activity = "正在读取本机状态…"
     @Published var error: String?
+    @Published var backgroundIssue: String?
+    private var backgroundIssueFromArchive = false
     @Published var autoArchive = true
     @Published var askToRestart = false
     @Published var usageBusy = false
@@ -99,19 +105,21 @@ struct SyncClaudeApp: App {
         timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self, !self.busy, !self.reviewingSessionPurge else { return }
-                if self.autoArchive && self.status?.pendingRecovery != true { self.archive(silent: true) } else { self.refresh() }
+                if self.autoArchive && self.status?.pendingRecovery != true { self.archive(silent: true) } else { self.refresh(silent: true) }
             }
         }
     }
-    func refresh() {
+    func refresh(silent: Bool = false) {
         guard !busy else { return }
         busy = true
         Task {
             do {
                 let result = try await Task.detached { [engine] in try engine.status() }.value
                 status = result
+                // A status refresh does not prove a previously failed archive has recovered.
+                if !backgroundIssueFromArchive { backgroundIssue = nil }
                 if activity == "正在读取本机状态…" { activity = "已读取本机数据，切换时自动合并 Code 记录。" }
-            } catch { self.error = error.localizedDescription }
+            } catch { report(error, background: silent) }
             busy = false
         }
     }
@@ -124,12 +132,25 @@ struct SyncClaudeApp: App {
                 let result = try await Task.detached { [engine] in try action(engine) }.value
                 if !silent { activity = result.message }
                 status = try await Task.detached { [engine] in try engine.status() }.value
+                backgroundIssue = nil
+                backgroundIssueFromArchive = false
             } catch {
-                self.error = error.localizedDescription
-                activity = "操作未完成。请查看提示。"
+                report(error, background: silent, archive: true)
                 if let latest = try? await Task.detached(operation: { [engine] in try engine.status() }).value { status = latest }
             }
             busy = false
+        }
+    }
+    func report(_ failure: Error, background: Bool, archive: Bool = false) {
+        if failure is LiveRecordReadPending {
+            backgroundIssueFromArchive = archive
+            backgroundIssue = autoArchive ? "Claude 正在写入新会话，下一轮会自动重试归档。" : failure.localizedDescription
+        } else if background {
+            backgroundIssueFromArchive = archive
+            backgroundIssue = "后台归档/读取未完成：\(failure.localizedDescription)"
+        } else {
+            error = failure.localizedDescription
+            activity = "操作未完成。请查看提示。"
         }
     }
     func archive(silent: Bool = false) { run("正在归档 Code 记录…", silent: silent) { try $0.archive() } }
@@ -145,7 +166,10 @@ struct SyncClaudeApp: App {
     func cancelRestart() { pendingRestart = nil; askToRestart = false }
     func sync() { restarting("正在保存历史、同步记录并重载 Claude…") { try $0.sync(allowOpenSessions: $1) } }
     func switchTo(_ profile: ProfileInfo) { restarting("正在切换到 \(profile.name)…") { try $0.switchProfile(id: profile.id, allowOpenSessions: $1) } }
-    func saveAccount(_ name: String) { restarting("正在保存官方账号…") { try $0.saveAccount(name: name, allowOpenSessions: $1) } }
+    func saveAccount(_ name: String) {
+        guard status?.canSaveOfficialAccount == true else { return }
+        restarting("正在保存官方账号…") { try $0.saveAccount(name: name, allowOpenSessions: $1) }
+    }
     func setAlias(_ profile: ProfileInfo, alias: String?) { run("正在保存配置别名…") { try $0.setProfileAlias(id: profile.id, kind: profile.kind, alias: alias) } }
     func prepareDeletion(_ profile: ProfileInfo) {
         guard !busy else { return }
@@ -198,6 +222,7 @@ struct SyncClaudeApp: App {
 
 struct MainView: View {
     @ObservedObject var model: AppModel
+    @EnvironmentObject var updates: UpdateModel
     @State private var selection: String?
     @State private var query = ""
     @State private var showGateway = false
@@ -246,10 +271,17 @@ struct MainView: View {
                 VStack(spacing: 10) {
                     Button { showGateway = true } label: { Label("添加 API 配置", systemImage: "plus").frame(maxWidth: .infinity) }.disabled(!canWrite)
                     HStack {
-                        Button("保存当前账号") { showAccount = true }.disabled(!canWrite || model.status?.canSaveOfficialAccount != true)
+                        if savedAccounts.contains(where: { $0.active }) {
+                            Label("当前账号已保存", systemImage: "checkmark.circle").foregroundStyle(.secondary)
+                                .help("切换离开时自动更新登录快照；名称可通过“编辑别名”修改。")
+                        } else {
+                            Button("保存当前账号") { showAccount = true }.disabled(!canWrite || model.status?.canSaveOfficialAccount != true)
+                        }
                         Button("添加官方账号") { showAddAccountConfirmation = true }.disabled(!canWrite)
                     }.font(.caption)
                     Button("官方账户用量") { showUsage = true }.frame(maxWidth: .infinity)
+                    Button(updates.availableVersion.map { "发现新版本 \($0)" } ?? "版本与更新…") { updates.showDetails = true }
+                        .font(.caption).frame(maxWidth: .infinity)
                 }.padding(16)
             }.frame(minWidth: 245, idealWidth: 260, maxWidth: 310)
             VStack(alignment: .leading, spacing: 0) {
@@ -275,6 +307,7 @@ struct MainView: View {
         .sheet(isPresented: $showAccount) { AccountForm { model.saveAccount($0) } }
         .sheet(item: $aliasProfile) { profile in ProfileAliasForm(model: model, profile: profile) }
         .sheet(isPresented: $showUsage) { UsageOverview(model: model) }
+        .sheet(isPresented: $updates.showDetails) { UpdateOverview(model: updates) }
         .sheet(isPresented: $showDeletedSessions, onDismiss: {
             model.reviewingSessionPurge = false
             if let preview = pendingSessionPurge { pendingSessionPurge = nil; model.purgeSessions(preview) }
@@ -456,7 +489,8 @@ struct MainView: View {
                             }
                             Spacer()
                             VStack(alignment: .trailing, spacing: 5) {
-                                Text(session.transcriptAvailable ? "历史可用" : "缺少历史正文").font(.caption2).foregroundStyle(session.transcriptAvailable ? Color.secondary : Color.orange)
+                                Text(session.initializing ? "正在初始化" : session.transcriptAvailable ? "历史可用" : "缺少历史正文").font(.caption2).foregroundStyle(session.initializing || session.transcriptAvailable ? Color.secondary : Color.orange)
+                                    .help(session.initializing ? "Claude 正在准备首次启动，记录就绪后会自动归档。" : "")
                                 if session.archived { Text("已归档").font(.caption2).foregroundStyle(.tertiary) }
                             }
                             Button { NSWorkspace.shared.open(URL(fileURLWithPath: session.project)) } label: { Image(systemName: "arrow.up.right") }.buttonStyle(.plain).help("打开项目文件夹")
@@ -472,8 +506,8 @@ struct MainView: View {
         VStack(spacing: 0) {
             Divider()
             HStack(spacing: 10) {
-                if model.busy { ProgressView().controlSize(.small) } else { Image(systemName: "checkmark.circle").foregroundStyle(.secondary) }
-                Text(model.activity).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                if model.busy { ProgressView().controlSize(.small) } else { Image(systemName: model.backgroundIssue == nil ? "checkmark.circle" : "exclamationmark.circle").foregroundStyle(model.backgroundIssue == nil ? Color.secondary : Color.orange) }
+                Text(model.backgroundIssue ?? model.activity).font(.caption).foregroundStyle(model.backgroundIssue == nil ? Color.secondary : Color.orange).lineLimit(3)
                 Spacer()
                 Toggle("后台归档", isOn: $model.autoArchive).toggleStyle(.switch).controlSize(.mini).font(.caption).help("每 30 秒保留本地记录；不在 Claude 运行时写回。切换配置时自动同步。")
             }.padding(.horizontal, 22).padding(.vertical, 13)

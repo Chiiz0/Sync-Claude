@@ -50,7 +50,7 @@ public final class Engine {
         self.home = home; self.support = home.appendingPathComponent("Library/Application Support")
         self.state = support.appendingPathComponent("SyncClaude")
         self.process = process; self.installedVersion = version
-        self.history = History(support: support, home: home, state: state)
+        self.history = History(support: support, home: home, state: state, isRunning: { process.running })
     }
     public var version: String {
         if let installedVersion { return installedVersion }
@@ -94,7 +94,8 @@ public final class Engine {
             let originalName = a["name"] as? String ?? "官方账号", alias = aliases[aliasKey(id: id, kind: "account")]
             profiles.append(ProfileInfo(id: id, name: alias ?? originalName, originalName: originalName, alias: alias, kind: "account", detail: "官方账号 · 本机登录快照", active: mode == "1p" && currentAccount == account))
         }
-        return Status(version: version, compatible: DesktopCompatibility.supports(version), running: process.running, workers: process.workers, mode: mode, profiles: profiles, sessions: try history.catalog(), ownerCount: try history.owners().count, pendingRecovery: hasPendingOperation, pendingPurge: exists(pendingPurge) || exists(pendingSessionPurge), statePath: state.path, accountRecords: try accountRecords(), removedAccountRecords: try removedAccountRecords(), restoredAccountBackups: try restoredAccountBackups(), officialUsage: try officialUsage(), canSaveOfficialAccount: mode == "1p" && currentAccount != nil, pendingDeletionCopies: try history.pendingDeletionCopies())
+        let canSave = mode == "1p" && currentAccount != nil && !profiles.contains { $0.kind == "account" && $0.active }
+        return Status(version: version, compatible: DesktopCompatibility.supports(version), running: process.running, workers: process.workers, mode: mode, profiles: profiles, sessions: try history.catalog(), ownerCount: try history.owners().count, pendingRecovery: hasPendingOperation, pendingPurge: exists(pendingPurge) || exists(pendingSessionPurge), statePath: state.path, accountRecords: try accountRecords(), removedAccountRecords: try removedAccountRecords(), restoredAccountBackups: try restoredAccountBackups(), officialUsage: try officialUsage(), canSaveOfficialAccount: canSave, pendingDeletionCopies: try history.pendingDeletionCopies())
     }
     public func archive() throws -> Outcome {
         try locked(state) {
@@ -200,6 +201,9 @@ public final class Engine {
     public func saveAccount(name: String, allowOpenSessions: Bool = false) throws -> Outcome {
         let name = try validName(name)
         guard try mode() == "1p" else { throw SyncError("当前是第三方 API 模式。请先切到官方登录、登录账号后保存。") }
+        if let account = try accountID(), try accounts().contains(where: { $0["account"] as? String == account }) {
+            return Outcome(message: "当前账号已保存，切换离开时会自动更新登录快照；名称可通过“编辑别名”修改。", added: 0)
+        }
         return try mutate("保存账号", configuration: false, allowOpenSessions: allowOpenSessions) { tx in try snapshot(name: name, tx: tx, requireLogin: true); return 0 }
     }
     public func switchProfile(id: String, allowOpenSessions: Bool = false) throws -> Outcome {
