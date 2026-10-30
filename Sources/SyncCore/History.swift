@@ -86,6 +86,7 @@ final class History {
         return result
     }
     func ingest() throws -> Int {
+        let deleted = try rememberDeletions()
         let records = try records(), transcripts = try transcripts()
         try privateDir(vault)
         var index = try readJSON(vault.appendingPathComponent("index.json"), optional: true)
@@ -110,18 +111,21 @@ final class History {
             }
         }
         try atomicJSON(index, vault.appendingPathComponent("index.json"))
-        return index.count
+        return index.keys.filter { deleted[$0.lowercased()] == nil }.count
     }
     func catalog() throws -> [SessionInfo] {
+        let deleted = try deletedSessions()
         let index = try readJSON(vault.appendingPathComponent("index.json"), optional: true)
         let ts = try transcripts()
         var infos: [String: SessionInfo] = [:]
         for (id, entry) in index {
             guard validSession(id), let e = entry as? [String: Any], let hash = e["hash"] as? String, hash.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil else { throw SyncError("历史索引损坏") }
+            if deleted[id.lowercased()] != nil { continue }
             let d = try readJSON(vault.appendingPathComponent("records/\(id)/\(hash).json"))
             infos[id] = info(d, ts)
         }
         for record in try records() {
+            if deleted[record.id.lowercased()] != nil { continue }
             if record.activity >= (infos[record.id]?.lastActivity ?? -1) { infos[record.id] = info(record.value, ts) }
         }
         return infos.values.sorted { $0.lastActivity > $1.lastActivity }
@@ -131,12 +135,14 @@ final class History {
     }
     // Existing records are never overwritten. Cross-account copies reset permissions and connector state.
     func merge(into targets: [Owner], transaction: Transaction) throws -> Int {
+        let deleted = try deletedSessions()
         let index = try readJSON(vault.appendingPathComponent("index.json"), optional: true)
         let ts = try transcripts()
         var added = 0
         let allowed: Set<String> = ["sessionId", "cliSessionId", "cwd", "originCwd", "title", "titleSource", "createdAt", "lastActivityAt", "model", "effort", "isArchived", "completedTurns", "priorCliSessionIds"]
         for (id, entry) in index.sorted(by: { $0.key < $1.key }) {
             guard validSession(id), let e = entry as? [String: Any], let hash = e["hash"] as? String, hash.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil else { throw SyncError("历史索引损坏") }
+            if deleted[id.lowercased()] != nil { continue }
             let bytes = try Data(contentsOf: vault.appendingPathComponent("records/\(id)/\(hash).json"))
             guard sha(bytes) == hash, let original = try JSONSerialization.jsonObject(with: bytes) as? [String: Any],
                   let cli = original["cliSessionId"] as? String, ts[cli] != nil else { continue }

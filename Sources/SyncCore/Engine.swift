@@ -27,6 +27,7 @@ public struct Status: Codable {
     public let restoredAccountBackups: [RemovedAccountRecord]
     public let officialUsage: [OfficialUsage]
     public let canSaveOfficialAccount: Bool
+    public let pendingDeletionCopies: Int
 }
 public struct Outcome: Codable {
     public let message: String
@@ -93,7 +94,7 @@ public final class Engine {
             let originalName = a["name"] as? String ?? "官方账号", alias = aliases[aliasKey(id: id, kind: "account")]
             profiles.append(ProfileInfo(id: id, name: alias ?? originalName, originalName: originalName, alias: alias, kind: "account", detail: "官方账号 · 本机登录快照", active: mode == "1p" && currentAccount == account))
         }
-        return Status(version: version, compatible: version == "4.29.0", running: process.running, workers: process.workers, mode: mode, profiles: profiles, sessions: try history.catalog(), ownerCount: try history.owners().count, pendingRecovery: hasPendingOperation, pendingPurge: exists(pendingPurge), statePath: state.path, accountRecords: try accountRecords(), removedAccountRecords: try removedAccountRecords(), restoredAccountBackups: try restoredAccountBackups(), officialUsage: try officialUsage(), canSaveOfficialAccount: mode == "1p" && currentAccount != nil)
+        return Status(version: version, compatible: DesktopCompatibility.supports(version), running: process.running, workers: process.workers, mode: mode, profiles: profiles, sessions: try history.catalog(), ownerCount: try history.owners().count, pendingRecovery: hasPendingOperation, pendingPurge: exists(pendingPurge), statePath: state.path, accountRecords: try accountRecords(), removedAccountRecords: try removedAccountRecords(), restoredAccountBackups: try restoredAccountBackups(), officialUsage: try officialUsage(), canSaveOfficialAccount: mode == "1p" && currentAccount != nil, pendingDeletionCopies: try history.pendingDeletionCopies())
     }
     public func archive() throws -> Outcome {
         try locked(state) {
@@ -103,7 +104,7 @@ public final class Engine {
         }
     }
     func checkCompatibility(configuration: Bool) throws {
-        guard version == "4.29.0" else { throw SyncError("当前适配 Claude 4.29.0；检测到 \(version)。只读归档可用，写入需先验证新版格式。") }
+        guard DesktopCompatibility.supports(version) else { throw SyncError("当前适配 Claude \(DesktopCompatibility.description)；检测到 \(version)。只读归档可用，写入需先验证新版格式。") }
         if configuration {
             let managed = URL(fileURLWithPath: "/Library/Managed Preferences/com.anthropic.claudefordesktop.plist")
             if exists(managed) { throw SyncError("检测到 MDM 管理配置；请通过组织配置管理切换。") }
@@ -125,6 +126,7 @@ public final class Engine {
             do {
                 _ = try history.ingest()
                 let added = try body(transaction)
+                let deleted = try history.synchronizeDeletions(transaction: transaction)
                 guard !process.running, process.workers == 0 else { throw SyncError("Claude 在操作期间重新启动，停止写入并准备恢复。") }
                 try transaction.commit()
                 if launch || wasRunning {
@@ -132,7 +134,8 @@ public final class Engine {
                     catch { return Outcome(message: "\(operation)已保存；Claude 未能启动。备份已保留，可手动打开 Claude。", added: added) }
                 }
                 let suffix = (launch || wasRunning) ? "Claude 已重新打开；登录及 API 可用性请在客户端确认。" : "将在下次切换配置时生效。"
-                return Outcome(message: "\(operation)完成，\(countLabel) \(added) \(countUnit)。\(suffix)", added: added)
+                let deletionSummary = deleted > 0 ? "已同步删除 \(deleted) 份其他账号中的会话记录。" : ""
+                return Outcome(message: "\(operation)完成，\(countLabel) \(added) \(countUnit)。\(deletionSummary)\(suffix)", added: added)
             } catch {
                 if process.running {
                     throw SyncError("Claude 意外重新启动；已保留恢复日志。请退出 Claude 后点击“恢复未完成操作”。")

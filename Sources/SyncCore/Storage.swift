@@ -141,8 +141,11 @@ final class Transaction {
         if source != nil { try privateDir(target.deletingLastPathComponent()); try fm.moveItem(at: stage, to: target) }
     }
     func write(_ value: Any, to target: URL) throws {
+        try writeData(jsonData(value), to: target)
+    }
+    func writeData(_ data: Data, to target: URL) throws {
         let temp = folder.appendingPathComponent("\(journal.entries.count)-new.json")
-        try atomicJSON(value, temp); try replace(target, with: temp)
+        try atomicData(data, temp); try replace(target, with: temp)
     }
     func commit() throws {
         journal.status = "complete"

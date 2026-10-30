@@ -12,7 +12,11 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Test
+      - name: Test Desktop 4.29.0 adapter
         run: swift test
+      - name: Test Desktop 4.4212.0 adapter
+        run: swift test
+        env:
+          SYNC_CLAUDE_TEST_DESKTOP_VERSION: 4.4212.0
       - name: Build app (ad-hoc signed)
         run: zsh scripts/build-app.sh

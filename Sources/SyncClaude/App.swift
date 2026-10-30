@@ -405,6 +405,10 @@ struct MainView: View {
                 Button("仅归档") { model.archive() }.disabled(model.busy)
                 Button("同步并重载") { model.sync() }.disabled(!canWrite)
             }
+            if let count = model.status?.pendingDeletionCopies, count > 0 {
+                Label("已主动删除的会话已从列表隐藏，另有 \(count) 份账号副本待删除。点击“同步并重载”或下次切换账号时同步。", systemImage: "trash")
+                    .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+            }
             HStack {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 TextField("搜索项目或会话", text: $query).textFieldStyle(.plain)
@@ -436,7 +440,7 @@ struct MainView: View {
                     }
                 }
             }
-            Text("共享本地 Code 记录；云端会话与 Cowork 不在同步范围。各账户已删除的记录不会恢复，已有记录不会覆盖。新账号首次进入 Code 后，再同步一次即可补齐。").font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text("共享本地 Code 记录；在任一账号主动删除的会话会从所有账号同步移除，也不会从归档重新加入。同步删除保留正文和操作备份，不等于永久擦除。云端与 Cowork 不在同步范围。").font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }
     var footer: some View {

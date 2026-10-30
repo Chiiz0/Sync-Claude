@@ -11,7 +11,7 @@ extension CoreTests {
         process.workers = 3
         _ = try engine.setProfileAlias(id: gateway, kind: "gateway", alias: "  工作 API 🚀  ")
         _ = try engine.setProfileAlias(id: sid, kind: "account", alias: "个人订阅")
-        let reloaded = Engine(home: root, process: process, version: "4.29.0")
+        let reloaded = Engine(home: root, process: process, version: engine.version)
         let status = try reloaded.status()
         XCTAssertEqual(status.profiles.map(\.name), ["工作 API 🚀", "个人订阅"])
         XCTAssertEqual(status.profiles.map(\.originalName), ["Gateway", "Original account"])
