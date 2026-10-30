@@ -94,7 +94,7 @@ public final class Engine {
             let originalName = a["name"] as? String ?? "官方账号", alias = aliases[aliasKey(id: id, kind: "account")]
             profiles.append(ProfileInfo(id: id, name: alias ?? originalName, originalName: originalName, alias: alias, kind: "account", detail: "官方账号 · 本机登录快照", active: mode == "1p" && currentAccount == account))
         }
-        return Status(version: version, compatible: DesktopCompatibility.supports(version), running: process.running, workers: process.workers, mode: mode, profiles: profiles, sessions: try history.catalog(), ownerCount: try history.owners().count, pendingRecovery: hasPendingOperation, pendingPurge: exists(pendingPurge), statePath: state.path, accountRecords: try accountRecords(), removedAccountRecords: try removedAccountRecords(), restoredAccountBackups: try restoredAccountBackups(), officialUsage: try officialUsage(), canSaveOfficialAccount: mode == "1p" && currentAccount != nil, pendingDeletionCopies: try history.pendingDeletionCopies())
+        return Status(version: version, compatible: DesktopCompatibility.supports(version), running: process.running, workers: process.workers, mode: mode, profiles: profiles, sessions: try history.catalog(), ownerCount: try history.owners().count, pendingRecovery: hasPendingOperation, pendingPurge: exists(pendingPurge) || exists(pendingSessionPurge), statePath: state.path, accountRecords: try accountRecords(), removedAccountRecords: try removedAccountRecords(), restoredAccountBackups: try restoredAccountBackups(), officialUsage: try officialUsage(), canSaveOfficialAccount: mode == "1p" && currentAccount != nil, pendingDeletionCopies: try history.pendingDeletionCopies())
     }
     public func archive() throws -> Outcome {
         try locked(state) {

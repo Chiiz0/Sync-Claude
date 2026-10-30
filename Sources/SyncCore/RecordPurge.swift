@@ -45,7 +45,7 @@ struct RecordPurgePlan: Codable {
 
 extension Engine {
     var pendingPurge: URL { state.appendingPathComponent("pending-purge.json") }
-    var hasPendingOperation: Bool { exists(state.appendingPathComponent("pending.json")) || exists(pendingPurge) }
+    var hasPendingOperation: Bool { exists(state.appendingPathComponent("pending.json")) || exists(pendingPurge) || exists(pendingSessionPurge) }
 
     func isEmptyRecordDirectory(_ root: URL) throws -> Bool {
         guard exists(root) else { return false }
@@ -314,7 +314,8 @@ extension Engine {
     }
 
     public func resumeRecordPurge(allowOpenSessions: Bool = false) throws -> Outcome {
-        try locked(state) {
+        if exists(pendingSessionPurge) { return try resumeSessionPurge(allowOpenSessions: allowOpenSessions) }
+        return try locked(state) {
             guard !exists(state.appendingPathComponent("pending.json")) else { throw SyncError("请先恢复原有事务。") }
             try safePath(pendingPurge)
             let plan = try JSONDecoder().decode(RecordPurgePlan.self, from: Data(contentsOf: pendingPurge))

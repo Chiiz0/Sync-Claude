@@ -19,6 +19,16 @@ struct SyncClaudeApp: App {
             do { print(try Engine().archive().message); exit(0) }
             catch { fputs("\(error.localizedDescription)\n", stderr); exit(1) }
         }
+        if args.contains("--deleted-sessions") || args.contains("--preview-session-purge") {
+            do {
+                let engine = Engine(), data: Data
+                if let i = args.firstIndex(of: "--preview-session-purge"), args.indices.contains(i + 1) {
+                    let ids = args[i + 1].split(separator: ",").map(String.init)
+                    data = try JSONEncoder().encode(engine.previewSessionPurge(ids: ids))
+                } else { data = try JSONEncoder().encode(engine.deletedSessionRecords()) }
+                print(String(decoding: data, as: UTF8.self)); exit(0)
+            } catch { fputs("\(error.localizedDescription)\n", stderr); exit(1) }
+        }
         if args.contains("--purge-empty-recovery") {
             do {
                 let engine = Engine()
@@ -80,6 +90,7 @@ struct SyncClaudeApp: App {
     @Published var askToRestart = false
     @Published var usageBusy = false
     @Published var deletionPreview: ProfileDeletionPreview?
+    var reviewingSessionPurge = false
     private var pendingRestart: (() -> Void)?
     let engine = Engine()
     private var timer: Timer?
@@ -87,7 +98,7 @@ struct SyncClaudeApp: App {
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                guard let self, !self.busy else { return }
+                guard let self, !self.busy, !self.reviewingSessionPurge else { return }
                 if self.autoArchive && self.status?.pendingRecovery != true { self.archive(silent: true) } else { self.refresh() }
             }
         }
@@ -161,6 +172,9 @@ struct SyncClaudeApp: App {
         else { run("正在永久清除恢复副本…") { try $0.purgeRecords(preview) } }
     }
     func resumePurge() { restarting("正在继续永久清除…") { try $0.resumeRecordPurge(allowOpenSessions: $1) } }
+    func purgeSessions(_ preview: SessionPurgePreview) {
+        restarting("正在永久清理已删除会话…") { try $0.purgeDeletedSessions(preview, allowOpenSessions: $1) }
+    }
     func refreshUsage() {
         guard !usageBusy else { return }
         usageBusy = true
@@ -191,6 +205,8 @@ struct MainView: View {
     @State private var aliasProfile: ProfileInfo?
     @State private var showAddAccountConfirmation = false
     @State private var showRecordManager = false
+    @State private var showDeletedSessions = false
+    @State private var pendingSessionPurge: SessionPurgePreview?
     @State private var pendingCleanup: [AccountRecordInfo] = []
     @State private var pendingRestore: String?
     @State private var pendingPurge: RecordPurgePreview?
@@ -259,6 +275,14 @@ struct MainView: View {
         .sheet(isPresented: $showAccount) { AccountForm { model.saveAccount($0) } }
         .sheet(item: $aliasProfile) { profile in ProfileAliasForm(model: model, profile: profile) }
         .sheet(isPresented: $showUsage) { UsageOverview(model: model) }
+        .sheet(isPresented: $showDeletedSessions, onDismiss: {
+            model.reviewingSessionPurge = false
+            if let preview = pendingSessionPurge { pendingSessionPurge = nil; model.purgeSessions(preview) }
+        }) {
+            DeletedSessionManager(model: model) { preview in
+                pendingSessionPurge = preview; showDeletedSessions = false
+            }
+        }
         .sheet(isPresented: $showRecordManager, onDismiss: {
             let cleanup = pendingCleanup, restore = pendingRestore, purge = pendingPurge
             pendingCleanup = []; pendingRestore = nil; pendingPurge = nil
@@ -402,6 +426,7 @@ struct MainView: View {
                 }
                 Spacer()
                 Button("账户记录管理") { showRecordManager = true }.disabled(model.busy)
+                Button("已删除会话…") { model.reviewingSessionPurge = true; showDeletedSessions = true }.disabled(model.busy || model.status?.pendingRecovery == true)
                 Button("仅归档") { model.archive() }.disabled(model.busy)
                 Button("同步并重载") { model.sync() }.disabled(!canWrite)
             }

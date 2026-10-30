@@ -6,9 +6,9 @@
 
 ## 下载与安装
 
-从 [最新 Release](https://github.com/Chiiz0/Sync-Claude/releases/latest) 下载 `Sync-Claude-0.1.1-macos-arm64.zip`，解压后将 **Sync Claude.app** 放到 `/Applications` 或 `~/Applications`，再打开使用。请先安装并打开一次 Claude Desktop。
+从 [最新 Release](https://github.com/Chiiz0/Sync-Claude/releases/latest) 下载 `Sync-Claude-0.1.2-macos-arm64.zip`，解压后将 **Sync Claude.app** 放到 `/Applications` 或 `~/Applications`，再打开使用。请先安装并打开一次 Claude Desktop。
 
-v0.1.1 增加 Claude Desktop 4.4212.0 适配和跨账号会话删除同步，已完成[本机验证](docs/validation-0.1.1.md)。从 v0.1.0 升级时，将新应用替换到原安装位置即可保留本机配置、账号快照和归档。
+v0.1.2 增加已删除会话的清单查看、范围预览与永久清理，已完成[本机预览与隔离删除验证](docs/validation-0.1.2.md)。继续支持 v0.1.1 的 Claude Desktop 4.4212.0 适配和跨账号会话删除同步；升级时将新应用替换到原安装位置，即可保留本机配置、账号快照及归档。安装更新不会自动执行永久清理。
 
 - 系统要求：macOS 13+；预编译包仅支持 Apple Silicon。
 - Claude 原生数据写入适配：**4.29.0 / 4.4212.0**；未知版本保持只读归档。
@@ -33,6 +33,7 @@ v0.1.1 增加 Claude Desktop 4.4212.0 适配和跨账号会话删除同步，已
 10. **删除配置**：侧栏右键选择 **删除官方账号…** 或 **删除 API 配置…**，核对确认框后删除。当前正在使用的配置需先切换。官方账号会从账号索引、快照目录、别名及用量缓存中移除；工具不会因自动保存而重新加入，需用户重新登录并明确保存。API 配置会从 Claude 原生配置库及别名中移除。Claude 若运行会正常重开。此操作不删除 Code 会话或共享归档，不注销官方服务端登录；操作备份及 API 钥匙串凭据仍保留，不能当作永久擦除，也不通过“账户记录管理”的目录恢复入口撤销。
 11. **永久清除恢复副本**：“可恢复”和“已恢复的备份”中每项都有 **永久清除…**，也可使用 **永久清除本页全部副本…**。预览会统计文件数和大小，并核对是否完全为空。确认后，清除所选账户/组织目录的全部恢复版本（包括此前恢复过的版本）及关联操作备份中的目录内容，同时移除旧索引中的对应条目；不为已删除内容重新生成备份。操作日志只留下清除标记。不会删除已重新建立的原目录、其他账户目录、共享会话正文或历史归档，因此不等于把某段会话从整台电脑彻底擦除。清除副本无需重启 Claude；直接删除原空目录会正常重开 Claude。
 12. **会话删除同步**：在任一账号的 Claude Code 中主动删除本地会话后，工具读取明确的删除标记，在下次刷新/归档时从列表隐藏该会话。其他账号仍有副本时显示待同步数量；点击 **同步并重载** 或切换配置，会正常退出 Claude、备份并移除这些副本。旧归档、账号目录恢复或后续切换不会重新带回已删除会话。仅缺少文件、退出登录或清理账户目录不算会话删除。此功能保留共享正文和操作备份，处理的是列表记录，不等于永久擦除所有内容。
+13. **永久清理已删除会话**（v0.1.2）：点击 **已删除会话…**，查看具体标题、项目、删除时间及保留副本，选择后点击 **预览永久清理…**。预览按类别列出文件数、占用和完整路径；核对后勾选确认，再点击 **永久清理**。范围包括所选会话的本机 JSONL、专属附件/子任务目录、工具元数据与正文归档、账户恢复副本中的相关记录、旧操作备份中的相关记录。其他会话共用正文时阻止清理，可把同样已删除的关联会话一并选择。清理会正常退出 Claude，复核内容指纹，不再生成这些内容的备份；中断后通过 **继续永久清除** 续做。保留仅含 ID/时间的删除标记，防止重新导入；不清除项目文件、登录/API 配置、其他会话、系统或手工外部备份。
 
 账号首次登录、MFA、验证码及过期凭据重新认证仍需用户完成。新账号首次进入 Code 后才产生可用账户目录，首次需要再点一次“同步并重载”。
 
@@ -66,6 +67,7 @@ Claude Desktop 在启动时读取推理配置，因此这里是**自动重启切
 | `history/records` | 按 SHA-256 保存的记录版本 |
 | `history/transcripts` | 按 SHA-256 保存的主会话正文版本 |
 | `history/deletions.json` | 已观察到的会话删除标记，仅含会话 ID 和删除时间；来源账号目录清理后仍保留删除决定 |
+| `pending-session-purge.json` | 中断时保留的会话永久清理清单，包含范围、内容哈希及保留项索引；完成后移除，不保存待删正文 |
 | `accounts` | 本机官方登录快照，每个快照包含校验清单 |
 | `accounts.json` | 账号名称、身份与快照索引，无明文 API Key |
 | `aliases.json` | 按配置类型和稳定 ID 保存的显示别名 |
@@ -103,13 +105,17 @@ zsh scripts/build-app.sh
 "dist/Sync Claude.app/Contents/MacOS/SyncClaude" --archive
 "dist/Sync Claude.app/Contents/MacOS/SyncClaude" --self-test-keychain
 "dist/Sync Claude.app/Contents/MacOS/SyncClaude" --purge-empty-recovery
+"dist/Sync Claude.app/Contents/MacOS/SyncClaude" --deleted-sessions
+"dist/Sync Claude.app/Contents/MacOS/SyncClaude" --preview-session-purge 'local_<uuid>'
 ```
 
 `--status` 包含本机项目路径和标题，应仅用于本地诊断。不会输出 API Key、登录 token 或完整 API 地址。Keychain 自测只创建并立即删除随机测试凭据。
 
+`--deleted-sessions` 和 `--preview-session-purge` 只列出信息，不删除内容；后者接受逗号分隔的会话 ID。输出也包含本机标题与路径，请保留在本机。会话永久清理通过界面确认执行。
+
 `--purge-empty-recovery` 默认只预览，没有删除副作用。核对结果后，追加 `--confirm-fingerprint <预览返回的 fingerprint>` 才执行；范围或内容变化会拒绝执行。此命令只接受经实际文件检查完全为空的恢复项及关联旧副本，非空项请在界面逐项确认。
 
-实现依据与已知边界见 [调研记录](docs/research.md)，验收结果见 [v0.1.1 验证记录](docs/validation-0.1.1.md)及 [v0.1.0 验证记录](docs/validation.md)。
+实现依据与已知边界见 [调研记录](docs/research.md)，验收结果见 [v0.1.2 验证记录](docs/validation-0.1.2.md)、[v0.1.1 验证记录](docs/validation-0.1.1.md)及 [v0.1.0 验证记录](docs/validation.md)。
 
 ## 许可与参考
 
