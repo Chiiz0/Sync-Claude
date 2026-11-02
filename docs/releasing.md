@@ -50,12 +50,12 @@ spctl --assess --type execute --verbose=2 'dist/Sync Claude.app'
 
 ## 打包与发布
 
-以下为 v0.1.3 的 Apple Silicon 资产名称。确保目标 ZIP 不存在，避免向旧归档追加内容：
+以下为 v0.1.4 的 Apple Silicon 资产名称。确保目标 ZIP 不存在，避免向旧归档追加内容：
 
 ```sh
 ditto -c -k --keepParent --norsrc --noextattr \
-  'dist/Sync Claude.app' dist/Sync-Claude-0.1.3-macos-arm64.zip
-(cd dist && shasum -a 256 Sync-Claude-0.1.3-macos-arm64.zip > SHA256SUMS)
+  'dist/Sync Claude.app' dist/Sync-Claude-0.1.4-macos-arm64.zip
+(cd dist && shasum -a 256 Sync-Claude-0.1.4-macos-arm64.zip > SHA256SUMS)
 ```
 
 解压到新目录，再验证签名、公证票据、Gatekeeper 和可执行文件架构；从解压产物启动应用做冒烟检查。发布 ZIP、`SHA256SUMS` 和脱敏验证结果，不发布 `.build`、用户 Application Support 目录、钥匙串或诊断原始日志。

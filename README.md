@@ -6,9 +6,9 @@
 
 ## 下载与安装
 
-从 [最新 Release](https://github.com/Chiiz0/Sync-Claude/releases/latest) 下载 `Sync-Claude-0.1.3-macos-arm64.zip`，解压后将 **Sync Claude.app** 放到 `/Applications` 或 `~/Applications`，再打开使用。请先安装并打开一次 Claude Desktop。
+从 [最新 Release](https://github.com/Chiiz0/Sync-Claude/releases/latest) 下载 `Sync-Claude-0.1.4-macos-arm64.zip`，解压后将 **Sync Claude.app** 放到 `/Applications` 或 `~/Applications`，再打开使用。请先安装并打开一次 Claude Desktop。
 
-v0.1.3 修复已保存账号的重复保存入口和新会话初始化时的错误提示，新增自动检查更新，已完成[本机验证](docs/validation-0.1.3.md)。继续支持 Claude Desktop 4.4212.0、跨账号会话删除同步，以及已删除会话的范围预览与永久清理；升级时将新应用替换到原安装位置，即可保留本机配置、账号快照及归档。安装更新不会自动执行永久清理。
+v0.1.4 修复应用仍在运行、主窗口关闭后却无法再次打开的问题：菜单栏和 Dock/Finder 统一恢复唯一主窗口，并新增 **File → 打开 Sync Claude**（`⌘0`）。关闭窗口后继续后台归档，检查更新时先显示主窗口；已完成[本机验证](docs/validation-0.1.4.md)。继续支持 Claude Desktop 4.4212.0、跨账号会话删除同步，以及已删除会话的范围预览与永久清理。升级前退出 Sync Claude，将新应用替换到原安装位置，再重新打开，即可保留本机配置、账号快照及归档。安装更新不会自动执行永久清理。
 
 - 系统要求：macOS 13+；预编译包仅支持 Apple Silicon。
 - Claude 原生数据写入适配：**4.29.0 / 4.4212.0**；未知版本保持只读归档。
@@ -92,6 +92,8 @@ Claude Desktop 在启动时读取推理配置，因此这里是**自动重启切
 不要在操作过程中手动启动另一实例 Claude，也不要让 CC Switch 同时写入配置库。读取现有 CC Switch 配置兼容；若其配置依赖本地路由，仍需让 CC Switch 路由服务运行。
 
 ## 构建与验证
+
+**0.1.4 窗口恢复修复**的旧版复现、回归测试、窗口操作与发布校验见[验证记录](docs/validation-0.1.4.md)。
 
 需要 macOS 13+ 和 Xcode/Swift 5.9+。当前本机产物为 Apple Silicon。
 

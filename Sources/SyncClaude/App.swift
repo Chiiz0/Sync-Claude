@@ -4,6 +4,7 @@ import SyncCore
 
 @main
 struct SyncClaudeApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model = AppModel()
     @StateObject private var updates = UpdateModel()
     init() {
@@ -58,14 +59,15 @@ struct SyncClaudeApp: App {
         }
     }
     var body: some Scene {
-        WindowGroup("Sync Claude") { MainView(model: model).environmentObject(updates).frame(minWidth: 960, minHeight: 640) }
+        Window("Sync Claude", id: MainWindow.id) {
+            MainWindowContent(appDelegate: appDelegate) {
+                MainView(model: model).environmentObject(updates).frame(minWidth: 960, minHeight: 640)
+            }
+        }
             .defaultSize(width: 1100, height: 740)
             .windowStyle(.titleBar)
             .commands {
-                CommandGroup(after: .appInfo) {
-                    Button("检查更新…") { updates.check(manual: true) }.disabled(updates.checking)
-                }
-                CommandGroup(replacing: .newItem) {}
+                MainWindowCommands(updates: updates)
                 CommandMenu("同步") {
                     Button("刷新状态") { model.refresh() }.keyboardShortcut("r")
                     Button("归档本机记录") { model.archive() }.disabled(model.busy)
@@ -73,7 +75,7 @@ struct SyncClaudeApp: App {
                 }
             }
         MenuBarExtra("Sync Claude", systemImage: "arrow.triangle.2.circlepath") {
-            Button("打开 Sync Claude") { NSApp.activate(ignoringOtherApps: true); NSApp.windows.first?.makeKeyAndOrderFront(nil) }
+            OpenMainWindowButton()
             Divider()
             ForEach(model.status?.profiles ?? []) { profile in
                 Button((profile.active ? "✓ " : "") + profile.name) { model.switchTo(profile) }.disabled(model.busy)

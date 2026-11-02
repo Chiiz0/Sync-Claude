@@ -10,7 +10,7 @@ import SyncCore
     @Published var automatic: Bool {
         didSet { defaults.set(automatic, forKey: "updates.automatic"); if automatic { check(manual: false) } }
     }
-    let currentVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.3"
+    let currentVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.4"
     private let defaults = UserDefaults.standard
     private var timer: Timer?
     var availableVersion: String? { latest?.isNewer(than: currentVersion) == true ? latest?.version?.description : nil }
