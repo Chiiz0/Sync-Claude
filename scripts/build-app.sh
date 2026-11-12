@@ -3,7 +3,7 @@ set -euo pipefail
 cd "${0:A:h:h}"
 swift build -c release
 bin_dir="$(swift build -c release --show-bin-path)"
-build_number="${SYNC_CLAUDE_BUILD:-11}"
+build_number="${SYNC_CLAUDE_BUILD:-12}"
 [[ "$build_number" == <-> ]] || { print -u2 'SYNC_CLAUDE_BUILD must be numeric'; exit 1; }
 app="$PWD/dist/Sync Claude.app"
 mkdir -p "$PWD/dist"
@@ -25,7 +25,7 @@ cat > "$bundle/Contents/Info.plist" <<PLIST
 <key>CFBundleDisplayName</key><string>Sync Claude</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
-<key>CFBundleShortVersionString</key><string>0.1.9</string>
+<key>CFBundleShortVersionString</key><string>0.1.10</string>
 <key>CFBundleVersion</key><string>$build_number</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>NSHighResolutionCapable</key><true/>

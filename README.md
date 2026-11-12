@@ -4,13 +4,13 @@
 
 采用 SwiftUI + Foundation + macOS Keychain，不需要 npm、Python 或本地后台服务。官方订阅用量通过 Anthropic 用量接口只读查询。
 
-**v0.1.9** 修复正文归档持续增长的问题，并自动精简旧版本遗留的重复快照；关闭后台归档仍会维护存量，开关状态在重启后保留。定时任务运行历史支持按任务折叠分组和批量选择。
+**v0.1.10** 同步已有会话的归档／取消归档、父子层级与明确的正文接续；保留各账号的标题、模型和权限设置，冲突时回滚，并阻止缺失正文或项目路径不一致的接续导入。
 
 ## 下载与安装
 
-从 [最新 Release](https://github.com/Chiiz0/Sync-Claude/releases/latest) 下载 `Sync-Claude-0.1.9-macos-arm64.zip`，解压后将 **Sync Claude.app** 放到 `/Applications` 或 `~/Applications`，再打开使用。请先安装并打开一次 Claude Desktop。
+从 [最新 Release](https://github.com/Chiiz0/Sync-Claude/releases/latest) 下载 `Sync-Claude-0.1.10-macos-arm64.zip`，解压后将 **Sync Claude.app** 放到 `/Applications` 或 `~/Applications`，再打开使用。请先安装并打开一次 Claude Desktop。
 
-v0.1.9 包含旧正文归档兼容修复。升级前退出 Sync Claude，将新应用替换到原安装位置，再重新打开，即可保留本机配置、账号快照及归档。
+v0.1.10 保留旧正文归档兼容修复。升级前退出 Sync Claude，将新应用替换到原安装位置，再重新打开，即可保留本机配置、账号快照及归档。
 
 - 系统要求：macOS 13+；预编译包仅支持 Apple Silicon。
 - 默认允许新版 Claude Desktop 继续使用切换、同步、清理和用量查询，遇到实际数据格式或接口错误时给出具体提示。
