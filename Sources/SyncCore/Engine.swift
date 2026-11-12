@@ -97,12 +97,12 @@ public final class Engine {
             profiles.append(ProfileInfo(id: id, name: alias ?? originalName, originalName: originalName, alias: alias, kind: "account", detail: "官方账号 · 本机登录快照", active: mode == "1p" && currentAccount == account, workspaceCount: owners.filter { $0.profile == "Claude" && $0.account == account }.count))
         }
         let canSave = mode == "1p" && currentAccount != nil && !profiles.contains { $0.kind == "account" && $0.active }
-        return Status(version: version, compatible: DesktopCompatibility.supports(version), running: process.running, workers: process.workers, mode: mode, profiles: profiles, sessions: try history.catalog(), ownerCount: try history.owners().count, pendingRecovery: hasPendingOperation, pendingPurge: exists(pendingPurge) || exists(pendingSessionPurge), statePath: state.path, accountRecords: try accountRecords(), removedAccountRecords: try removedAccountRecords(), restoredAccountBackups: try restoredAccountBackups(), officialUsage: try officialUsage(), canSaveOfficialAccount: canSave, pendingDeletionCopies: try history.pendingDeletionCopies())
+        return Status(version: version, compatible: DesktopCompatibility.supports(version), running: process.running, workers: process.workers, mode: mode, profiles: profiles, sessions: try history.catalog(preferredOwners: Set(try syncTargets().map(\.key))), ownerCount: try history.owners().count, pendingRecovery: hasPendingOperation, pendingPurge: exists(pendingPurge) || exists(pendingSessionPurge), statePath: state.path, accountRecords: try accountRecords(), removedAccountRecords: try removedAccountRecords(), restoredAccountBackups: try restoredAccountBackups(), officialUsage: try officialUsage(), canSaveOfficialAccount: canSave, pendingDeletionCopies: try history.pendingDeletionCopies())
     }
     public func archive() throws -> Outcome {
         try locked(state) {
             guard !hasPendingOperation else { throw SyncError("需要先完成上次操作") }
-            let count = try history.ingest()
+            let count = try history.ingest(preferredOwners: Set(syncTargets().map(\.key)))
             return Outcome(message: "已归档 \(count) 条本地 Code 记录。Claude 原始文件未修改。", added: count)
         }
     }
@@ -127,7 +127,7 @@ public final class Engine {
                 guard !process.running, process.workers == 0 else { throw SyncError("Claude 重新启动，已停止写入。") }
             }
             do {
-                _ = try history.ingest()
+                _ = try history.ingest(preferredOwners: Set(syncTargets().map(\.key)))
                 let added = try body(transaction)
                 if exists(scheduleLedger) { try applyTaskDeletions(transaction: transaction) }
                 let deleted = try history.synchronizeDeletions(transaction: transaction)
@@ -142,7 +142,8 @@ public final class Engine {
                 let taskSummary = transaction.taskImports > 0 ? "已新增 \(transaction.taskImports) 份本机定时任务副本，保留启用/暂停状态；新工作区使用默认权限。" : ""
                 let workspaceSummary = transaction.syncedWorkspaceCount > 1 ? "已同步此账号的 \(transaction.syncedWorkspaceCount) 个本地工作区；请在 Claude 中选择个人或团队工作区。" : ""
                 let lineageSummary = transaction.lineageRepairs > 0 ? "已修复 \(transaction.lineageRepairs) 份会话树关联。" : ""
-                return Outcome(message: "\(operation)完成，\(countLabel) \(added) \(countUnit)。\(workspaceSummary)\(lineageSummary)\(taskSummary)\(deletionSummary)\(suffix)", added: added)
+                let stateSummary = transaction.sessionStateUpdates > 0 ? "已更新 \(transaction.sessionStateUpdates) 份已有会话状态，其中正文接续 \(transaction.continuationRepairs) 份。" : ""
+                return Outcome(message: "\(operation)完成，\(countLabel) \(added) \(countUnit)。\(workspaceSummary)\(stateSummary)\(lineageSummary)\(taskSummary)\(deletionSummary)\(suffix)", added: added)
             } catch {
                 if process.running {
                     throw SyncError("Claude 意外重新启动；已保留恢复日志。请退出 Claude 后点击“恢复未完成操作”。")

@@ -3,6 +3,8 @@ set -euo pipefail
 cd "${0:A:h:h}"
 swift build -c release
 bin_dir="$(swift build -c release --show-bin-path)"
+build_number="${SYNC_CLAUDE_BUILD:-11}"
+[[ "$build_number" == <-> ]] || { print -u2 'SYNC_CLAUDE_BUILD must be numeric'; exit 1; }
 app="$PWD/dist/Sync Claude.app"
 mkdir -p "$PWD/dist"
 staging="$(mktemp -d "$PWD/dist/.build-app.XXXXXX")"
@@ -13,7 +15,7 @@ cp "$bin_dir/SyncClaude" "$bundle/Contents/MacOS/SyncClaude"
 cp LICENSE "$bundle/Contents/Resources/LICENSE"
 swift scripts/make-icon.swift "$PWD/.build/AppIcon.iconset"
 iconutil -c icns "$PWD/.build/AppIcon.iconset" -o "$bundle/Contents/Resources/AppIcon.icns"
-cat > "$bundle/Contents/Info.plist" <<'PLIST'
+cat > "$bundle/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -24,7 +26,7 @@ cat > "$bundle/Contents/Info.plist" <<'PLIST'
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundleShortVersionString</key><string>0.1.9</string>
-<key>CFBundleVersion</key><string>11</string>
+<key>CFBundleVersion</key><string>$build_number</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>

@@ -134,7 +134,7 @@ final class History {
         }
         return result
     }
-    func ingest() throws -> Int {
+    func ingest(preferredOwners: Set<String> = []) throws -> Int {
         // Reclaim legacy copies before allocating another full transcript, even if
         // reading the current Desktop records will fail later in this operation.
         try compactArchivedTranscripts().checkFailures()
@@ -148,7 +148,8 @@ final class History {
             if !exists(version) { try atomicData(bytes, version) }
             let old = index[record.id] as? [String: Any]
             let last = old?["lastActivity"] as? Double ?? -1
-            if record.activity >= last {
+            let oldPreferred = (old?["owner"] as? String).map(preferredOwners.contains) ?? false
+            if record.activity > last || record.activity == last && (!oldPreferred || preferredOwners.contains(record.owner.key)) {
                 index[record.id] = ["hash": hash, "owner": record.owner.key, "lastActivity": record.activity]
             }
             var ids = record.value["priorCliSessionIds"] as? [String] ?? []
@@ -168,7 +169,7 @@ final class History {
         try atomicJSON(index, vault.appendingPathComponent("index.json"))
         return index.keys.filter { deleted[$0.lowercased()] == nil }.count
     }
-    func catalog() throws -> [SessionInfo] {
+    func catalog(preferredOwners: Set<String> = []) throws -> [SessionInfo] {
         let deleted = try deletedSessions()
         let index = try readJSON(vault.appendingPathComponent("index.json"), optional: true)
         let ts = try transcripts()
@@ -179,22 +180,34 @@ final class History {
             let d = try readJSON(vault.appendingPathComponent("records/\(id)/\(hash).json"))
             infos[id] = info(d, ts)
         }
+        var preferred = Set<String>()
+        for (id, raw) in index {
+            if let owner = (raw as? [String: Any])?["owner"] as? String, preferredOwners.contains(owner) { preferred.insert(id) }
+        }
         for record in try records() {
             if deleted[record.id.lowercased()] != nil { continue }
-            if record.activity >= (infos[record.id]?.lastActivity ?? -1) { infos[record.id] = info(record.value, ts) }
+            let activity = infos[record.id]?.lastActivity ?? -1
+            if record.activity > activity || record.activity == activity && (!preferred.contains(record.id) || preferredOwners.contains(record.owner.key)) {
+                infos[record.id] = info(record.value, ts)
+                if preferredOwners.contains(record.owner.key) { preferred.insert(record.id) } else { preferred.remove(record.id) }
+            }
         }
         return infos.values.sorted { $0.lastActivity > $1.lastActivity }
     }
     func info(_ d: [String: Any], _ ts: [String: URL]) -> SessionInfo {
         SessionInfo(id: d["sessionId"] as? String ?? "", title: d["title"] as? String ?? "未命名会话", project: d["originCwd"] as? String ?? d["cwd"] as? String ?? "", lastActivity: (d["lastActivityAt"] as? NSNumber)?.doubleValue ?? 0, transcriptAvailable: ts[d["cliSessionId"] as? String ?? ""] != nil, archived: d["isArchived"] as? Bool ?? false, initializing: isInitializingCodeRecord(d), scheduledTaskID: d["scheduledTaskId"] as? String)
     }
-    // Existing records retain their settings; only missing, verified associations are filled.
-    // Cross-account copies reset permissions and connector state.
-    func merge(into targets: [Owner], transaction: Transaction) throws -> Int {
+    // Reconcile shared state independently from account-local settings and permissions.
+    func merge(from sources: [Owner] = [], into targets: [Owner], transaction: Transaction) throws -> Int {
         let deleted = try deletedSessions()
         let index = try readJSON(vault.appendingPathComponent("index.json"), optional: true)
         let ts = try transcripts()
         let current = try records()
+        let byID = Dictionary(grouping: current.filter { !$0.initializing }, by: \.id)
+        let sourceKeys = Set(sources.map(\.key))
+        let oldLedger = try readJSON(sessionStateFile, optional: true)
+        var ledger = try SessionStateLedger(oldLedger)
+        ledger.entries = ledger.entries.filter { deleted[$0.key.lowercased()] == nil }
         let lineage = SessionLineageResolver(vault: vault, records: current)
         let linked = Dictionary(grouping: current.filter { $0.value["scheduledTaskId"] is String }, by: \.id)
         var writes: [(target: URL, value: [String: Any], added: Bool, repaired: Bool)] = []
@@ -209,7 +222,44 @@ final class History {
             let bytes = try Data(contentsOf: vault.appendingPathComponent("records/\(id)/\(hash).json"))
             guard sha(bytes) == hash, var original = try JSONSerialization.jsonObject(with: bytes) as? [String: Any],
                   original["sessionId"] as? String == id,
-                  let cli = original["cliSessionId"] as? String, ts[cli] != nil else { continue }
+                  let archivedCLI = original["cliSessionId"] as? String, uuid(archivedCLI) else { continue }
+            let copies = byID[id] ?? []
+            let continuation = try SessionContinuation([original] + copies.map(\.value))
+            if let trackedCLI = ledger.entries[id]?["cli"] as? String,
+               try !continuation.includes(original["cliSessionId"] as! String, trackedCLI),
+               let tracked = copies.first(where: { $0.value["cliSessionId"] as? String == trackedCLI }) {
+                original = tracked.value
+            }
+            original = try continuation.latest(from: original)
+            let cli = original["cliSessionId"] as! String
+            let chain = try continuation.ancestors(of: cli)
+            guard ts[cli] != nil else {
+                if copies.contains(where: { record in
+                    targets.contains(record.owner) && record.value["cliSessionId"] as? String != cli
+                }) { throw SyncError("最新接续正文缺失，已保留旧会话，请先恢复正文后重试。") }
+                continue
+            }
+            let eligible = try copies.filter { try continuation.includes(cli, $0.value["cliSessionId"] as! String) }
+            let completeContinuation = chain.allSatisfy { ts[$0] != nil } && eligible.allSatisfy {
+                $0.value["cliSessionId"] as? String == cli || $0.value["cwd"] as? String == original["cwd"] as? String
+            }
+            let relation: [String: Any]
+            if ledger.entries[id] != nil {
+                // The baseline already distinguishes a deliberate top-level state
+                // from a legacy import. Stale archives cannot arbitrate it again.
+                // Retain portable labels for new copies; resolve/apply below still
+                // decides the shared parentage from the baseline and observed edits.
+                relation = try SessionLineage.portable(original, session: id)
+            } else {
+                let preferredLineage = eligible.first { sourceKeys.contains($0.owner.key) && SessionLineage.hasMetadata($0.value) }
+                relation = try preferredLineage.map { try SessionLineage.portable($0.value, session: id) }
+                    ?? lineage.resolve(session: id, cli: cli)
+            }
+            var fallback = original
+            for key in SessionLineage.keys { fallback.removeValue(forKey: key) }
+            fallback.merge(relation) { _, new in new }
+            let shared = try ledger.resolve(id: id, cli: cli, copies: eligible, sources: sourceKeys,
+                                            fallback: SessionStateLedger.state(fallback, session: id), continuation: continuation)
             let taskIDs = Set((linked[id] ?? []).filter { $0.value["cliSessionId"] as? String == cli }.compactMap { $0.value["scheduledTaskId"] as? String })
             guard taskIDs.count <= 1 else { throw SyncError("会话 \(id) 的定时任务关联冲突，请先检查各账号记录。") }
             if let task = taskIDs.first { original["scheduledTaskId"] = task }
@@ -220,34 +270,50 @@ final class History {
                 if exists(target) {
                     var existing = try readJSON(target)
                     guard existing["sessionId"] as? String == id,
-                          existing["cliSessionId"] as? String == cli,
+                          let existingCLI = existing["cliSessionId"] as? String,
                           existing["sshHost"] == nil, existing["remoteSessionId"] == nil,
                           existing["environmentId"] == nil else { continue }
-                    var changed = false, repaired = false
+                    guard try continuation.includes(cli, existingCLI) else { continue }
+                    let before = try jsonData(existing)
+                    let oldRelation = try SessionStateLedger.relationship(existing, session: id)
+                    if existingCLI != cli {
+                        guard completeContinuation, existing["cwd"] as? String == original["cwd"] as? String else {
+                            throw SyncError("会话接续正文不完整或项目路径已变化，未更新正文指向。")
+                        }
+                        existing["cliSessionId"] = cli
+                        existing["priorCliSessionIds"] = chain
+                        existing["lastActivityAt"] = max(existing["lastActivityAt"] as? Double ?? 0, original["lastActivityAt"] as? Double ?? 0)
+                        if let turns = original["completedTurns"] { existing["completedTurns"] = turns }
+                        transaction.continuationRepairs += 1
+                    } else if !chain.isEmpty, existing["priorCliSessionIds"] as? [String] != chain {
+                        guard completeContinuation else { throw SyncError("会话接续正文不完整或项目路径已变化，未更新历史链。") }
+                        existing["priorCliSessionIds"] = chain
+                    }
                     if existing["scheduledTaskId"] == nil, let task = original["scheduledTaskId"] as? String,
                        LocalSchedule.validID(task) {
-                        existing["scheduledTaskId"] = task; changed = true
+                        existing["scheduledTaskId"] = task
                     }
-                    // Explicit detach/reparent choices belong to this workspace. Recover only
-                    // copies with no lineage fields, as produced by older Sync Claude versions.
-                    if !SessionLineage.hasMetadata(existing) {
-                        let recovered = try lineage.resolve(session: id, cli: cli)
-                        if !recovered.isEmpty {
-                            existing.merge(recovered) { _, new in new }; changed = true; repaired = true
-                            graphs[owner, default: [:]][id.lowercased()] = existing
-                            starts[owner, default: []].insert(id.lowercased())
-                        }
+                    try SessionStateLedger.apply(shared, to: &existing, id: id)
+                    let repaired = try jsonData(oldRelation) != jsonData(SessionStateLedger.relationship(existing, session: id))
+                    if try before != jsonData(existing) {
+                        writes.append((target, existing, false, repaired))
+                        graphs[owner, default: [:]][id.lowercased()] = existing
+                        starts[owner, default: []].insert(id.lowercased())
+                        transaction.sessionStateUpdates += 1
                     }
-                    if changed { writes.append((target, existing, false, repaired)) }
+                    try ledger.record(id: id, owner: owner.key, value: existing)
                     continue
                 }
+                guard completeContinuation else { throw SyncError("会话接续正文不完整或项目路径已变化，未导入会话。") }
                 var copy = original.filter { allowed.contains($0.key) }
-                copy.merge(try lineage.resolve(session: id, cli: cli)) { _, new in new }
+                copy.merge(relation) { _, new in new }
+                try SessionStateLedger.apply(shared, to: &copy, id: id)
                 copy["permissionMode"] = "default"
                 copy["remoteControlAutoEligible"] = false
                 graphs[owner, default: [:]][id.lowercased()] = copy
                 starts[owner, default: []].insert(id.lowercased())
                 writes.append((target, copy, true, false))
+                try ledger.record(id: id, owner: owner.key, value: copy)
             }
         }
         // Check each resulting workspace before writing any of its planned records. Missing
@@ -258,6 +324,9 @@ final class History {
         for write in writes {
             try transaction.write(write.value, to: write.target)
             if write.repaired { transaction.lineageRepairs += 1 }
+        }
+        if !targets.isEmpty, try jsonData(oldLedger) != jsonData(ledger.document) {
+            try transaction.write(ledger.document, to: sessionStateFile)
         }
         return writes.filter(\.added).count
     }

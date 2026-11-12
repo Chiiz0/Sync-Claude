@@ -241,6 +241,11 @@ extension Engine {
         for id in ids { try remove(history.vault.appendingPathComponent("records/" + id), category: "元数据归档") }
         let index = history.vault.appendingPathComponent("index.json")
         if exists(index) { try rewrite(index, value: readJSON(index).filter { !selected.contains($0.key.lowercased()) }) }
+        if exists(history.sessionStateFile) {
+            var ledger = try SessionStateLedger(readJSON(history.sessionStateFile))
+            ledger.entries = ledger.entries.filter { !selected.contains($0.key.lowercased()) }
+            try rewrite(history.sessionStateFile, value: ledger.document)
+        }
 
         // Keep unrelated records in a directory recovery copy restorable after selective erasure.
         if exists(cleanupIndex) {
@@ -294,7 +299,7 @@ extension Engine {
             try safePath(file)
             var allowed = false
             if action.kind == "metadata" {
-                allowed = file == history.vault.appendingPathComponent("index.json") || file == cleanupIndex
+                allowed = file == history.vault.appendingPathComponent("index.json") || file == history.sessionStateFile || file == cleanupIndex
                 if action.path.hasPrefix(state.path + "/backups/") {
                     let parts = relative.split(separator: "/")
                     allowed = parts.count == 3 && parts[2] == "manifest.json" && String(parts[1]).range(of: "^[0-9]+-[a-f0-9-]{36}$", options: .regularExpression) != nil

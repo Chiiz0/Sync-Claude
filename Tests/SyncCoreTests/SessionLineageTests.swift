@@ -173,13 +173,14 @@ extension CoreTests {
         XCTAssertEqual(try Data(contentsOf: file), before)
     }
 
-    func testLineageAmbiguousLiveParentsRollbackWithoutOverwritingEitherSide() throws {
+    func testLineageAmbiguousSourceWorkspacesRollbackWithoutOverwritingEitherSide() throws {
         let source = try owner("Claude-3p", a), target = try owner("Claude", b)
         let team = try workspace("Claude", b, gateway)
         try selectOfficial(b)
         _ = try lineageFixture(source, id: sid); _ = try lineageFixture(source, id: gateway)
         _ = try lineageFixture(source, id: a, parent: sid)
         _ = try lineageFixture(target, id: a, parent: gateway)
+        _ = try lineageFixture(team, id: a, parent: sid)
         let before = try [source, target, team].map { try digestTree($0) }
         XCTAssertThrowsError(try engine.sync())
         XCTAssertEqual(try [source, target, team].map { try digestTree($0) }, before)

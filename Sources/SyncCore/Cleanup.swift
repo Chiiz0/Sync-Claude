@@ -149,6 +149,7 @@ extension Engine {
             let backup = state.appendingPathComponent("removed-records/\(id)/content")
             guard exists(backup), try digestTree(backup) == entry.digest else { throw SyncError("恢复副本缺失或校验失败，未修改账户目录。") }
             try tx.replace(target, with: backup)
+            try history.noteRestoredState(ownerKey: "\(entry.profile)/\(entry.account)/\(entry.organization)", transaction: tx)
             entries[index].restoredAt = Date().timeIntervalSince1970
             try writeCleanupEntries(entries, tx)
             return 1

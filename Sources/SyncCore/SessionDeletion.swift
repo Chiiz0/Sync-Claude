@@ -62,6 +62,12 @@ extension History {
     /// Called only inside a stopped-Claude transaction. Back up metadata, never erase JSONL.
     func synchronizeDeletions(transaction: Transaction) throws -> Int {
         let deleted = try rememberDeletions()
+        if exists(sessionStateFile) {
+            let before = try readJSON(sessionStateFile)
+            var ledger = try SessionStateLedger(before)
+            ledger.entries = ledger.entries.filter { deleted[$0.key.lowercased()] == nil }
+            if try jsonData(before) != jsonData(ledger.document) { try transaction.write(ledger.document, to: sessionStateFile) }
+        }
         var count = 0
         for record in try records() {
             guard let timestamp = deleted[record.id.lowercased()] else { continue }

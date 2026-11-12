@@ -304,7 +304,7 @@ extension Engine {
 
     func mergeWork(from source: [Owner], transaction tx: Transaction) throws -> Int {
         let targets = try syncTargets()
-        let sessions = try history.merge(into: targets, transaction: tx)
+        let sessions = try history.merge(from: source, into: targets, transaction: tx)
         let tasks = try synchronizeTasks(from: source, into: targets, transaction: tx)
         tx.taskImports = tasks
         tx.syncedWorkspaceCount = targets.count
