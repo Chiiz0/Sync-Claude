@@ -20,6 +20,8 @@ codesign -dv --verbose=4 'dist/Sync Claude.app'
 
 使用已通过 `notarytool store-credentials` 保存的本机 profile。以下 `<profile>` 是名称，不是密码：
 
+profile 是公证登录凭据的本机别名，不绑定某个应用。经核对开发者团队及权限后，同一团队的多个应用可以使用同一 profile；各应用仍须保留自己的 bundle identifier、签名和发布资产。
+
 ```sh
 ditto -c -k --keepParent --norsrc --noextattr \
   'dist/Sync Claude.app' dist/notary-submission.zip
