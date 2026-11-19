@@ -1,8 +1,18 @@
-# 发布 macOS 版本
+# 发布 macOS 和 Ubuntu 版本
+
+两个平台的发布源码来自 `main`。选定发布提交后，可在该提交的 GitHub Actions「Build and test」记录中查看 macOS 和 Ubuntu 的验证结果。
+
+## Ubuntu 软件包
+
+在 `scripts/build-deb.sh` 中更新 Debian 包版本。CI 在 Ubuntu 24.04 上构建 amd64 软件包，并在 24.04 和 26.04 上安装同一份包，验证命令行、归档、GTK 和桌面密钥环。该次运行的 `sync-claude-ubuntu-amd64` 工件包含已测试的 `.deb`。
+
+发布 Ubuntu 版本时，从对应提交的 CI 工件取出 `.deb`，将其作为 Release 资产。与 macOS 同次发布时，把本次发布的 ZIP 和 `.deb` 放入空目录，在该目录使用 `shasum -a 256 *.zip *.deb > SHA256SUMS` 生成覆盖两份资产的校验文件。
+
+## macOS 应用
 
 默认本地构建不需要开发者证书。公开分发包在 macOS 签名机上制作；证书私钥和公证凭据仅保存在本机钥匙串，不提交 Git 或上传到 Release。
 
-## 测试与签名
+### 测试与签名
 
 先更新 `scripts/build-app.sh` 中的版本/构建号及 `CHANGELOG.md`，运行：
 
@@ -16,7 +26,7 @@ codesign -dv --verbose=4 'dist/Sync Claude.app'
 
 确认签名类型为 Developer ID Application，包含 Hardened Runtime 和安全时间戳。应用不需要额外放宽运行时的 entitlement。
 
-## 公证与票据
+### 公证与票据
 
 使用已通过 `notarytool store-credentials` 保存的本机 profile。以下 `<profile>` 是名称，不是密码：
 
@@ -50,7 +60,7 @@ spctl --assess --type execute --verbose=2 'dist/Sync Claude.app'
 
 在首次启动之前完成票据附加和打包。本次签名机对已运行的构建目录拒绝写入，`stapler` 返回 Error 73；从同一已公证 ZIP 解压出尚未启动的副本后，票据附加、签名和 Gatekeeper 校验均正常通过，无需修改签名或放宽系统保护。
 
-## 打包与发布
+### 打包与发布
 
 以下为 v0.1.10 的 Apple Silicon 资产名称。确保目标 ZIP 不存在，避免向旧归档追加内容：
 
@@ -62,4 +72,4 @@ ditto -c -k --keepParent --norsrc --noextattr \
 
 解压到新目录，再验证签名、公证票据、Gatekeeper 和可执行文件架构；从解压产物启动应用做冒烟检查。发布 ZIP、`SHA256SUMS` 和脱敏验证结果，不发布 `.build`、用户 Application Support 目录、钥匙串或诊断原始日志。
 
-提交已验证源码，建立版本标签，通过 `gh` 创建 Release。发布后下载资产再次比较 SHA-256，并核对本地 HEAD、远端分支和标签一致。GitHub Actions 只执行不含凭据的测试与 ad-hoc 构建。
+提交已验证源码，建立版本标签，通过 `gh` 创建 Release。发布后下载资产再次比较 SHA-256，并核对本地 HEAD、远端分支和标签一致。macOS 的 CI 使用 ad-hoc 签名。
