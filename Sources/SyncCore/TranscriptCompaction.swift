@@ -1,5 +1,9 @@
 import Foundation
+#if os(Linux)
+import Glibc
+#else
 import Darwin
+#endif
 
 public struct TranscriptCompactionResult {
     public internal(set) var removedFiles = 0

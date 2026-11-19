@@ -1,6 +1,14 @@
 import Foundation
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+import Crypto
+#endif
+#if os(Linux)
+import Glibc
+#else
 import Darwin
+#endif
 
 public struct DeletedSessionInfo: Codable, Identifiable {
     public let id: String

@@ -1,12 +1,41 @@
 # Sync Claude
 
-面向 **macOS Claude Desktop** 的原生小工具，保存官方账号、切换第三方 API 配置，让本机 Code 会话记录和主动删除决定在账号之间同步。
+面向 **macOS 和 Ubuntu 上的 Claude Desktop** 的原生小工具，保存官方账号、切换第三方 API 配置，让本机 Code 会话记录和主动删除决定在账号之间同步。
 
-采用 SwiftUI + Foundation + macOS Keychain，不需要 npm、Python 或本地后台服务。官方订阅用量通过 Anthropic 用量接口只读查询。
+macOS 版使用 SwiftUI 和系统钥匙串，Ubuntu 版使用 GTK 和桌面密钥环。两者共用 Swift 同步、归档和事务恢复逻辑。
 
 **v0.1.10** 同步已有会话的归档／取消归档、父子层级与明确的正文接续；保留各账号的标题、模型和权限设置，冲突时回滚，并阻止缺失正文或项目路径不一致的接续导入。
 
-## 下载与安装
+## Ubuntu 24.04 / 26.04 LTS
+
+先安装并打开一次官方 Claude Desktop 的 `.deb`。Sync Claude 使用官方包的桌面入口和配置目录。[Claude Desktop 安装说明](https://support.claude.com/en/articles/10065433-install-claude-desktop)
+
+在项目根目录构建并安装。脚本在 Ubuntu 24.04 的 Swift 6.1 环境构建，其他环境自动使用 Docker；安装后的软件可直接运行。
+
+```sh
+./scripts/build-deb.sh
+sudo apt install ./dist/sync-claude_0.1.10-1_$(dpkg --print-architecture).deb
+sync-claude
+```
+
+也可从应用菜单打开 **Sync Claude**。窗口列出官方账号、API 配置和 Code 会话。选择配置后点击 **切换到所选配置**，或使用 **同步并重载** 合并会话和本机定时任务。**登录新账号** 后需在 Claude 完成登录、进入一次 Code，再返回 **保存当前账号**。**每 30 秒归档** 在窗口打开期间生效，重启后保留开关设置。
+
+- 在 **添加 API** 中输入服务地址和 Key。凭据助手通过 Secret Service 读取 Key，需要已解锁的桌面密钥环。
+- 切换时向持有当前配置锁的 Claude 主进程请求正常退出，写入完成后从系统桌面入口重开。存在打开的 Code 会话或无法识别主进程时，请先保存工作并从 Claude 菜单退出。
+- 原生数据目录为 `~/.config/Claude`、`~/.config/Claude-3p`，本工具的快照、备份和恢复日志位于 `~/.config/SyncClaude`。设置绝对路径 `XDG_CONFIG_HOME` 时三个目录随之移动。正文位于 `~/.claude/projects`。
+- 官方用量按钮打开当前浏览器账号的 Claude 用量页。macOS 的多账号用量面板、菜单栏和应用内版本检查目前仅在 macOS 提供。
+- 命令行提供别名、模型偏好修复、账户目录清理与恢复、已删除会话和任务运行历史管理。清理命令默认输出预览，执行时核对预览指纹。
+
+```sh
+sync-claude --help
+sync-claude --status
+sync-claude --archive
+sync-claude --self-test-keychain
+```
+
+Ubuntu 安装包的验证流程在 24.04 上运行 Swift 核心测试，再在 24.04 和 26.04 的干净环境中安装同一份 amd64 包，检查 GTK 窗口、会话归档及密钥环读写。
+
+## macOS 下载与安装
 
 从 [最新 Release](https://github.com/Chiiz0/Sync-Claude/releases/latest) 下载 `Sync-Claude-0.1.10-macos-arm64.zip`，解压后将 **Sync Claude.app** 放到 `/Applications` 或 `~/Applications`，再打开使用。请先安装并打开一次 Claude Desktop。
 
@@ -19,7 +48,7 @@ v0.1.10 保留旧正文归档兼容修复。升级前退出 Sync Claude，将新
 
 先将应用放在稳定位置，再添加 API 配置。凭据助手使用应用的绝对路径，后续移动应用需要更新助手路径。
 
-## 使用
+## macOS 使用
 
 打开安装后的 **Sync Claude.app**。
 
@@ -124,7 +153,7 @@ Claude Desktop 在启动时读取推理配置，因此这里是**自动重启切
 
 不要在操作过程中手动启动另一实例 Claude，也不要让 CC Switch 同时写入配置库。读取现有 CC Switch 配置兼容；若其配置依赖本地路由，仍需让 CC Switch 路由服务运行。
 
-## 构建与验证
+## macOS 构建与验证
 
 **0.1.4 窗口恢复修复**的旧版复现、回归测试、窗口操作与发布校验见[验证记录](docs/validation-0.1.4.md)。
 

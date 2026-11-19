@@ -48,18 +48,30 @@ public final class Engine {
     var library: URL { third.appendingPathComponent("configLibrary") }
     var registry: URL { state.appendingPathComponent("accounts.json") }
     static let identityFiles = ["Cookies", "Cookies-journal", "Network", "Local State", "Local Storage", "Session Storage", "IndexedDB", "WebStorage", "Service Worker", "Partitions", "config.json", "config.json.journal", "Preferences"]
-    public init(home: URL = FileManager.default.homeDirectoryForCurrentUser, process: ClaudeProcess = MacClaudeProcess(), version: String? = nil) {
-        self.home = home; self.support = home.appendingPathComponent("Library/Application Support")
+    public init(home: URL? = nil, process: ClaudeProcess = DesktopProcess(), version: String? = nil) {
+        #if os(Linux)
+        let environment = ProcessInfo.processInfo.environment
+        self.home = home ?? LinuxDesktop.home(in: environment)
+        // Explicit home directories (fixtures and alternate roots) are self-contained.
+        self.support = LinuxDesktop.config(home: self.home, xdg: home == nil ? environment["XDG_CONFIG_HOME"] : nil)
+        #else
+        self.home = home ?? FileManager.default.homeDirectoryForCurrentUser
+        self.support = self.home.appendingPathComponent("Library/Application Support")
+        #endif
         self.state = support.appendingPathComponent("SyncClaude")
         self.process = process; self.installedVersion = version
-        self.history = History(support: support, home: home, state: state, isRunning: { process.running })
+        self.history = History(support: support, home: self.home, state: state, isRunning: { process.running })
     }
     public var version: String {
         if let installedVersion { return installedVersion }
+        #if os(Linux)
+        return LinuxDesktop.version
+        #else
         for path in ["/Applications/Claude.app/Contents/Info.plist", home.appendingPathComponent("Applications/Claude.app/Contents/Info.plist").path] {
             if let data = fm.contents(atPath: path), let p = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any], let v = p["CFBundleShortVersionString"] as? String { return v }
         }
         return "未安装"
+        #endif
     }
     func mode() throws -> String { try readJSON(third.appendingPathComponent("claude_desktop_config.json"), optional: true)["deploymentMode"] as? String ?? "1p" }
     func accountID() throws -> String? {
@@ -109,7 +121,11 @@ public final class Engine {
     func checkCompatibility(configuration: Bool) throws {
         guard DesktopCompatibility.supports(version) else { throw SyncError("未检测到 Claude Desktop，请先安装并打开一次。") }
         if configuration {
+            #if os(Linux)
+            let managed = URL(fileURLWithPath: "/etc/claude-desktop/managed-settings.json")
+            #else
             let managed = URL(fileURLWithPath: "/Library/Managed Preferences/com.anthropic.claudefordesktop.plist")
+            #endif
             if exists(managed) { throw SyncError("检测到 MDM 管理配置；请通过组织配置管理切换。") }
             if try metadata()["hybridPointer"] != nil { throw SyncError("配置由组织账号下发，不能通过本地文件覆盖。") }
         }
@@ -260,7 +276,7 @@ public final class Engine {
               url.scheme == "https" || (url.scheme == "http" && ["localhost", "127.0.0.1", "::1", "[::1]"].contains(host)) else { throw SyncError("请填写 HTTPS API 地址（本机回环地址可用 HTTP），不要包含用户名、密码或查询参数。") }
         guard ["bearer", "x-api-key"].contains(auth) else { throw SyncError("认证方式无效") }
         guard models.count <= 200, models.allSatisfy({ $0.range(of: "^(anthropic/)?claude-(sonnet|opus|haiku|fable)-[A-Za-z0-9._:-]+$", options: .regularExpression) != nil }) else { throw SyncError("模型名需使用 Claude 桌面端支持的 claude-sonnet/opus/haiku/fable-* 格式。其他模型请先通过兼容网关映射。") }
-        guard helper.hasPrefix("/"), fm.isExecutableFile(atPath: helper) else { throw SyncError("凭据助手不可用，请从安装后的 Sync Claude.app 添加配置。") }
+        guard helper.hasPrefix("/"), fm.isExecutableFile(atPath: helper) else { throw SyncError("凭据助手不可用，请从安装后的 Sync Claude 添加配置。") }
         let id = UUID().uuidString.lowercased()
         try CredentialStore.put(id: id, secret: key)
         do {

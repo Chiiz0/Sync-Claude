@@ -226,7 +226,7 @@ extension CoreTests {
         _ = try engine.sync()
         XCTAssertEqual(try tasks(target)[0]["enabled"] as? Bool, false)
         _ = try taskFixture(source, id: "future-task")
-        let future = Date().addingTimeInterval(86400).timeIntervalSince1970 * 1000
+        let future = (Date().addingTimeInterval(86400).timeIntervalSince1970 * 1000).rounded()
         try editTask(source, id: "future-task") { $0.removeValue(forKey: "cronExpression"); $0["fireAt"] = future }
         _ = try engine.sync()
         XCTAssertEqual(try tasks(target).first { $0["id"] as? String == "future-task" }?["fireAt"] as? Double, future)

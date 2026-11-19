@@ -1,7 +1,12 @@
 import Foundation
+import CoreFoundation
+#if os(macOS)
 import Security
 import LocalAuthentication
 import CommonCrypto
+#else
+import FoundationNetworking
+#endif
 
 public struct UsageWindow: Codable, Identifiable {
     public let id: String
@@ -25,6 +30,7 @@ struct UsageCredential {
 
 // Electron's macOS v10 safeStorage format. Secrets are read only in memory, never cached here.
 enum DesktopTokenReader {
+    #if os(macOS)
     static func storagePassword() throws -> Data {
         let context = LAContext(); context.interactionNotAllowed = true
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
@@ -58,6 +64,7 @@ enum DesktopTokenReader {
               let object = try? JSONSerialization.jsonObject(with: Data(plain.prefix(written))) as? [String: Any] else { throw SyncError("官方登录解密失败") }
         return object
     }
+    #endif
     static func credential(_ entries: [String: Any], account: String, now: Double = Date().timeIntervalSince1970) throws -> UsageCredential {
         guard uuid(account) else { throw SyncError("官方账号标识无效") }
         let prefix = "acct:\(account)|9d1c250a-e61b-44d9-88ed-5944d1962f5e:"
@@ -174,6 +181,7 @@ extension Engine {
             value.name = name; return value
         }.sorted { $0.name < $1.name }
     }
+    #if os(macOS)
     func usageCredential(_ account: String) throws -> UsageCredential {
         let config: [String: Any]
         if try accountID() == account {
@@ -195,6 +203,7 @@ extension Engine {
     public func refreshUsage() async throws -> Outcome {
         try await refreshUsage(credential: { try self.usageCredential($0) }, fetch: { try await UsageHTTPClient().fetch($0) })
     }
+    #endif
     func refreshUsage(credential: (String) throws -> UsageCredential, fetch: (String) async throws -> Data) async throws -> Outcome {
         guard DesktopCompatibility.supports(version) else { throw SyncError("未检测到 Claude Desktop，请先安装并打开一次。") }
         let previous = try locked(state) { try officialUsage() }

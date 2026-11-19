@@ -431,3 +431,19 @@ final class CoreTests: XCTestCase {
         try tx.rollback()
     }
 }
+
+extension CoreTests {
+    func testTranscriptConflictIsScopedToReferencedDesktopHistory() throws {
+        let dir = try owner("Claude", a)
+        _ = try fixture(dir)
+        for (project, line) in [("a", "A"), ("b", "B")] {
+            try atomicData(Data((line + "\n").utf8), root.appendingPathComponent(".claude/projects/\(project)/\(b).jsonl"))
+        }
+        XCTAssertEqual(try engine.status().sessions.count, 1)
+        XCTAssertEqual(try engine.archive().added, 1)
+        _ = try fixture(dir, id: b, transcript: false)
+        XCTAssertThrowsError(try engine.archive()) { error in
+            XCTAssertTrue(error.localizedDescription.contains("内容不同"))
+        }
+    }
+}

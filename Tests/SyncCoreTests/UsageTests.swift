@@ -8,6 +8,7 @@ extension CoreTests {
     func usageRegistry() throws {
         try atomicJSON(["accounts": [["id": gateway, "account": a, "name": "Account A"], ["id": sid, "account": b, "name": "Account B"]]], engine.registry)
     }
+    #if os(macOS)
     func testDesktopTokenDecryptUsesV10GoldenFixture() throws {
         // Fixture encrypted independently with OpenSSL and PBKDF2-HMAC-SHA1; no real credential.
         let fixture = "djEwDbY1hae4DCdyUny/pcoJYfEZSZknabHu6NMstt1RLOEArjNfwu4+HcXmbycoNdcj"
@@ -16,6 +17,7 @@ extension CoreTests {
         XCTAssertThrowsError(try DesktopTokenReader.decrypt(fixture, password: Data("wrong".utf8)))
         XCTAssertThrowsError(try DesktopTokenReader.decrypt(Data("v20not-supported".utf8).base64EncodedString(), password: Data("fixture-password".utf8)))
     }
+    #endif
     func testUsageCredentialRequiresExactAccountHostScopeAndLiveExpiry() throws {
         let prefix = "|9d1c250a-e61b-44d9-88ed-5944d1962f5e:\(org):"
         func entry(_ token: String, expiry: Double = 2000000) -> [String: Any] { ["token": token, "expiresAt": expiry, "subscriptionType": "pro"] }
@@ -80,6 +82,7 @@ extension CoreTests {
         XCTAssertFalse(try String(contentsOf: engine.usageCache).contains("secret"))
         XCTAssertTrue(try engine.officialUsage().allSatisfy { $0.windows.isEmpty && $0.fetchedAt == nil && $0.error != nil })
     }
+    #if os(macOS)
     func testUsageSnapshotIdentityIsValidatedBeforeCredentialAccess() throws {
         _ = try engine.switchProfile(id: "official"); try login(a, token: "A")
         _ = try engine.saveAccount(name: "A"); try login(b, token: "B")
@@ -87,4 +90,5 @@ extension CoreTests {
         try atomicJSON(["lastKnownAccountUuid": b], engine.state.appendingPathComponent("accounts/\(id)/\(snapshot)/config.json"))
         XCTAssertThrowsError(try engine.usageCredential(a)) { error in XCTAssertTrue(error.localizedDescription.contains("校验失败")) }
     }
+    #endif
 }

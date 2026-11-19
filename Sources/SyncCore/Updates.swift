@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 public struct ReleaseVersion: Comparable, Equatable {
     let components: [Int]

@@ -1,4 +1,4 @@
-name: macOS build and tests
+name: Build and test
 
 on:
   push:
@@ -20,3 +20,28 @@ jobs:
           SYNC_CLAUDE_TEST_DESKTOP_VERSION: 4.4212.0
       - name: Build app (ad-hoc signed)
         run: zsh scripts/build-app.sh
+
+  ubuntu:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Test and package on Ubuntu 24.04
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
+            -v "$PWD:/src" -w /src swift:6.1 bash -ec \
+            'swift test -j 4 --force-resolved-versions && scripts/build-deb.sh'
+      - name: Install and run the package on both LTS releases
+        run: |
+          for release in 24.04 26.04; do
+            docker run --rm -v "$PWD:/src:ro" -e DEBIAN_FRONTEND=noninteractive "ubuntu:$release" bash -ec '
+              apt-get update -qq
+              apt-get install -y --no-install-recommends /src/dist/*.deb \
+                xvfb xauth dbus-x11 gnome-keyring desktop-file-utils
+              runuser -u ubuntu -- xvfb-run -a dbus-run-session -- /usr/bin/python3 /src/scripts/test-ubuntu.py
+            '
+          done
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sync-claude-ubuntu-amd64
+          path: dist/*.deb
+          if-no-files-found: error

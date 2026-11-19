@@ -1,7 +1,12 @@
 import Foundation
+import CoreFoundation
+#if os(Linux)
+import Glibc
+#else
 import Darwin
+#endif
 
-public struct RecordPurgePreview: Identifiable {
+public struct RecordPurgePreview: Identifiable, Encodable {
     public var id: String { fingerprint }
     public let directoryCount: Int
     public let recoveryCopyCount: Int

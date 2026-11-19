@@ -10,6 +10,24 @@ public struct SessionInfo: Codable, Identifiable {
     public let initializing: Bool
     public let scheduledTaskID: String?
 }
+// Standalone CLI sessions share ~/.claude/projects with Desktop. Only resolve
+// duplicate files when a Desktop record or its continuation actually refers to them.
+struct TranscriptIndex {
+    var files: [String: [URL]] = [:]
+
+    subscript(id: String) -> URL? {
+        get throws {
+            guard let matches = files[id], let first = matches.first else { return nil }
+            if matches.count > 1 {
+                let digest = try digestTree(first)
+                for other in matches.dropFirst() where try digestTree(other) != digest {
+                    throw SyncError("会话正文 \(id) 出现在多个项目且内容不同，请先处理冲突。")
+                }
+            }
+            return first
+        }
+    }
+}
 struct Owner: Hashable {
     let profile: String
     let account: String
@@ -100,9 +118,10 @@ final class History {
     }
     func records() throws -> [Record] {
         var records: [Record] = []
+        lazy var desktopRunning = isRunning()
         for owner in try owners() {
             for file in try fm.contentsOfDirectory(at: owner.directory, includingPropertiesForKeys: nil) where file.pathExtension == "json" && file.lastPathComponent.hasPrefix("local_") {
-                let value = try readNativeRecordJSON(file, running: isRunning())
+                let value = try readNativeRecordJSON(file, running: desktopRunning)
                 guard let id = value["sessionId"] as? String, validSession(id), file.lastPathComponent == id + ".json",
                       let cwd = value["cwd"] as? String, cwd.hasPrefix("/"),
                       isInitializingCodeRecord(value) || (value["cliSessionId"] as? String).map(uuid) == true else {
@@ -115,21 +134,18 @@ final class History {
         }
         return records
     }
-    func transcripts() throws -> [String: URL] {
+    func transcripts() throws -> TranscriptIndex {
         let root = home.appendingPathComponent(".claude/projects")
         try safePath(root)
-        guard exists(root) else { return [:] }
-        var result: [String: URL] = [:]
+        var result = TranscriptIndex()
+        guard exists(root) else { return result }
         for project in try fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey]) {
             try safePath(project)
             guard (try project.resourceValues(forKeys: [.isDirectoryKey])).isDirectory == true else { continue }
             for file in try fm.contentsOfDirectory(at: project, includingPropertiesForKeys: nil) where file.pathExtension == "jsonl" && uuid(file.deletingPathExtension().lastPathComponent) {
                 try safePath(file)
                 let id = file.deletingPathExtension().lastPathComponent
-                if let previous = result[id], try sha(Data(contentsOf: previous)) != sha(Data(contentsOf: file)) {
-                    throw SyncError("同一会话 ID 出现在两个不同的历史文件中；需先处理冲突。")
-                }
-                result[id] = file
+                result.files[id, default: []].append(file)
             }
         }
         return result
@@ -155,7 +171,7 @@ final class History {
             var ids = record.value["priorCliSessionIds"] as? [String] ?? []
             ids.append(record.value["cliSessionId"] as! String)
             for id in Set(ids) where uuid(id) {
-                guard let source = transcripts[id] else { continue }
+                guard let source = try transcripts[id] else { continue }
                 // A live JSONL may be mid-append: keep complete prefixes only. Never rewrite the source.
                 var content = try Data(contentsOf: source)
                 if let lastLF = content.lastIndex(of: 10) { content = content.prefix(through: lastLF) } else { continue }
@@ -178,7 +194,7 @@ final class History {
             guard validSession(id), let e = entry as? [String: Any], let hash = e["hash"] as? String, hash.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil else { throw SyncError("历史索引损坏") }
             if deleted[id.lowercased()] != nil { continue }
             let d = try readJSON(vault.appendingPathComponent("records/\(id)/\(hash).json"))
-            infos[id] = info(d, ts)
+            infos[id] = try info(d, ts)
         }
         var preferred = Set<String>()
         for (id, raw) in index {
@@ -188,14 +204,14 @@ final class History {
             if deleted[record.id.lowercased()] != nil { continue }
             let activity = infos[record.id]?.lastActivity ?? -1
             if record.activity > activity || record.activity == activity && (!preferred.contains(record.id) || preferredOwners.contains(record.owner.key)) {
-                infos[record.id] = info(record.value, ts)
+                infos[record.id] = try info(record.value, ts)
                 if preferredOwners.contains(record.owner.key) { preferred.insert(record.id) } else { preferred.remove(record.id) }
             }
         }
         return infos.values.sorted { $0.lastActivity > $1.lastActivity }
     }
-    func info(_ d: [String: Any], _ ts: [String: URL]) -> SessionInfo {
-        SessionInfo(id: d["sessionId"] as? String ?? "", title: d["title"] as? String ?? "未命名会话", project: d["originCwd"] as? String ?? d["cwd"] as? String ?? "", lastActivity: (d["lastActivityAt"] as? NSNumber)?.doubleValue ?? 0, transcriptAvailable: ts[d["cliSessionId"] as? String ?? ""] != nil, archived: d["isArchived"] as? Bool ?? false, initializing: isInitializingCodeRecord(d), scheduledTaskID: d["scheduledTaskId"] as? String)
+    func info(_ d: [String: Any], _ ts: TranscriptIndex) throws -> SessionInfo {
+        SessionInfo(id: d["sessionId"] as? String ?? "", title: d["title"] as? String ?? "未命名会话", project: d["originCwd"] as? String ?? d["cwd"] as? String ?? "", lastActivity: (d["lastActivityAt"] as? NSNumber)?.doubleValue ?? 0, transcriptAvailable: try ts[d["cliSessionId"] as? String ?? ""] != nil, archived: d["isArchived"] as? Bool ?? false, initializing: isInitializingCodeRecord(d), scheduledTaskID: d["scheduledTaskId"] as? String)
     }
     // Reconcile shared state independently from account-local settings and permissions.
     func merge(from sources: [Owner] = [], into targets: [Owner], transaction: Transaction) throws -> Int {
@@ -233,14 +249,14 @@ final class History {
             original = try continuation.latest(from: original)
             let cli = original["cliSessionId"] as! String
             let chain = try continuation.ancestors(of: cli)
-            guard ts[cli] != nil else {
+            guard try ts[cli] != nil else {
                 if copies.contains(where: { record in
                     targets.contains(record.owner) && record.value["cliSessionId"] as? String != cli
                 }) { throw SyncError("最新接续正文缺失，已保留旧会话，请先恢复正文后重试。") }
                 continue
             }
             let eligible = try copies.filter { try continuation.includes(cli, $0.value["cliSessionId"] as! String) }
-            let completeContinuation = chain.allSatisfy { ts[$0] != nil } && eligible.allSatisfy {
+            let completeContinuation = try chain.allSatisfy { try ts[$0] != nil } && eligible.allSatisfy {
                 $0.value["cliSessionId"] as? String == cli || $0.value["cwd"] as? String == original["cwd"] as? String
             }
             let relation: [String: Any]

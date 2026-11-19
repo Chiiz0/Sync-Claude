@@ -72,7 +72,7 @@ extension Engine {
         let transcripts = try history.transcripts()
         for record in try history.records() where selected.contains(record.id) {
             fingerprints.append(record.file.path + ":" + (try digestTree(record.file)))
-            guard let cli = record.value["cliSessionId"] as? String, let transcript = transcripts[cli] else { throw SyncError("运行正文已变化") }
+            guard let cli = record.value["cliSessionId"] as? String, let transcript = try transcripts[cli] else { throw SyncError("运行正文已变化") }
             fingerprints.append(transcript.path + ":" + (try digestTree(transcript)))
         }
         for manifest in try taskManifests() {

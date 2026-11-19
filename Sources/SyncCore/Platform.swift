@@ -1,4 +1,5 @@
 import Foundation
+#if os(macOS)
 import Security
 import AppKit
 
@@ -26,12 +27,16 @@ public enum CredentialStore {
     public static func remove(id: String) { SecItemDelete([kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: id] as CFDictionary) }
 }
 
+#endif
+
 public protocol ClaudeProcess {
     var running: Bool { get }
     var workers: Int { get }
     func stop(allowOpenSessions: Bool) throws
     func start() throws
 }
+#if os(macOS)
+public typealias DesktopProcess = MacClaudeProcess
 public final class MacClaudeProcess: ClaudeProcess {
     public init() {}
     private var apps: [NSRunningApplication] { NSRunningApplication.runningApplications(withBundleIdentifier: "com.anthropic.claudefordesktop") }
@@ -66,3 +71,4 @@ public final class MacClaudeProcess: ClaudeProcess {
         guard running else { throw SyncError("Claude 未启动，请检查安装位置。") }
     }
 }
+#endif

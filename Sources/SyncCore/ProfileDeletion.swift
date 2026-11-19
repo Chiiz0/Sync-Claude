@@ -1,6 +1,6 @@
 import Foundation
 
-public struct ProfileDeletionPreview: Identifiable {
+public struct ProfileDeletionPreview: Identifiable, Encodable {
     public let id: String
     public let kind: String
     public let name: String

@@ -1,0 +1,5 @@
+#!/bin/sh
+if [ "$#" -eq 0 ]; then
+    exec /usr/bin/python3 /usr/lib/sync-claude/window.py
+fi
+exec /usr/lib/sync-claude/SyncClaude "$@"

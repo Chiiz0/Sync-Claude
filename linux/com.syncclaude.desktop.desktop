@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Sync Claude
+Comment=Switch Claude Desktop profiles and sync local Code history
+Comment[zh_CN]=切换 Claude Desktop 配置并同步本机 Code 会话
+Exec=sync-claude
+Icon=view-refresh
+Terminal=false
+Categories=Utility;

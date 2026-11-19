@@ -75,7 +75,7 @@ extension Engine {
             return AccountRecordInfo(id: owner.key, profile: owner.profile, account: owner.account, organization: owner.organization,
                 sessionCount: sessionFiles.count,
                 uniqueSessionCount: local.filter { occurrences[$0.id]?.count == 1 }.count,
-                missingTranscriptCount: local.filter { transcripts[$0.value["cliSessionId"] as? String ?? ""] == nil }.count,
+                missingTranscriptCount: try local.filter { try transcripts[$0.value["cliSessionId"] as? String ?? ""] == nil }.count,
                 fileCount: files.count, bytes: bytes, empty: empty, savedLogin: owner.profile == "Claude" && saved.contains(owner.account),
                 blockedReason: reason, fingerprint: try digestTree(owner.directory))
         }
