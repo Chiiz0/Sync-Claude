@@ -32,6 +32,21 @@ extension CoreTests {
         XCTAssertThrowsError(try desktop.stop(allowOpenSessions: true))
     }
 
+    func testDesktopWithoutExeBlocksWritesUntilItBecomesAZombie() throws {
+        let proc = root.appendingPathComponent("proc")
+        let pid = proc.appendingPathComponent("124")
+        let desktop = DesktopProcess(proc: proc, support: engine.support)
+        try atomicData(Data("claude-desktop\n".utf8), pid.appendingPathComponent("comm"))
+        let stat = pid.appendingPathComponent("stat")
+        try atomicData(Data("124 (claude-desktop) S 1".utf8), stat)
+        XCTAssertTrue(desktop.running)
+        XCTAssertEqual(desktop.workers, 0)
+        XCTAssertThrowsError(try desktop.stop(allowOpenSessions: false))
+        try atomicData(Data("124 (claude-desktop) Z 1".utf8), stat)
+        XCTAssertFalse(desktop.running)
+        try desktop.stop(allowOpenSessions: false)
+    }
+
     func testProcessGuardFailsClosedWhenProcIsUnavailable() throws {
         let desktop = DesktopProcess(proc: root.appendingPathComponent("missing"), support: engine.support)
         XCTAssertTrue(desktop.running)

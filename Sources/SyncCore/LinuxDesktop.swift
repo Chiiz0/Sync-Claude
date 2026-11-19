@@ -92,7 +92,9 @@ public final class DesktopProcess: ClaudeProcess {
                    let uid = try? fm.attributesOfItem(atPath: path)[.ownerAccountID] as? NSNumber,
                    uid.uint32Value == getuid(),
                    let stat = try? String(contentsOfFile: path + "/stat"), !stat.contains(") Z ") {
-                    throw SyncError("无法核对 Claude 进程，请退出 Claude 后重试。")
+                    // A process can lose exe just before becoming a zombie. Keep
+                    // waiting for it; mainPID independently verifies any signal target.
+                    if name == "claude-desktop" { desktop.insert(number) } else { workers += 1 }
                 }
                 continue
             }
